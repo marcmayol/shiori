@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Entornos / uv
+.venv/
+.uv/
+
+# Herramientas
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.tensorboard/
+runs/
+
+# Datos y artefactos pesados (se versionan aparte: DVC/HF Hub)
+data/
+checkpoints/
+*.gguf
+*.safetensors
+*.bin
+cache/
+completions_cache/
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
