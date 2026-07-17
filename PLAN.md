@@ -123,13 +123,15 @@ DoD: dataset final 50-120k filas; informe de balance por clase; test de leakage 
 
 Procedimiento: entrenar el peldaño, correr la evaluación de la Fase 5, y SOLO si no cumple pasar al siguiente. El primer peldaño que cumple es el modelo final.
 
-- [ ] Smoke test previo por peldaño: overfit intencional sobre 200 ejemplos hasta ~100% exact match (valida el pipeline antes de gastar horas)
-- [ ] Peldaño 1: Gemma 3 270M, full fine-tune. Batch grande, 2-3 epochs, lr con sweep corto sobre el 10% de los datos
-- [ ] Peldaño 2: Qwen3-0.6B, full fine-tune (misma receta ajustada)
+- [x] Smoke test previo por peldaño: overfit intencional sobre 200 ejemplos hasta ~100% exact match (valida el pipeline antes de gastar horas)  <!-- peldaño 1: exact match 1.000 -->
+- [x] Peldaño 1: Gemma 3 270M, full fine-tune. Batch grande, 2-3 epochs, lr con sweep corto sobre el 10% de los datos  <!-- full FT bf16, batch 16, 3 epochs, lr 2e-5 (sin sweep, ver reports/fase4_5_gemma270m.md); VRAM 14.31 GB, sin OOM -->
+- [ ] Peldaño 2: Qwen3-0.6B, full fine-tune (misma receta ajustada)  <!-- solo si el peldaño 1 no cumple; fuera de este goal -->
 - [ ] Peldaño 3 (techo de escape): Qwen3-1.7B, QLoRA 4-bit, seq len 4k
-- [ ] Máscara de pérdida solo sobre la respuesta del assistant
-- [ ] Logging local (tensorboard) + checkpoints con retención de los 2 mejores
-- [ ] Ablación solo en el peldaño ganador: full FT vs LoRA (si aplica) y sensibilidad al tamaño del dataset (50% vs 100%)
+- [x] Máscara de pérdida solo sobre la respuesta del assistant  <!-- tokenize_with_completion_mask + SelectiveLossTrainer -->
+- [x] Logging local (tensorboard) + checkpoints con retención de los 2 mejores  <!-- report_to tensorboard, save_total_limit 2 -->
+- [ ] Ablación solo en el peldaño ganador: full FT vs LoRA (si aplica) y sensibilidad al tamaño del dataset (50% vs 100%)  <!-- solo tras elegir peldaño ganador -->
+
+Peldaño 1 (Gemma 3 270M) entrenado y evaluado: exact 0.77 en pools no vistos (DIRECT 0.94/TOOL_CALL 0.82/PLAN 0.57), 0% inválidos con constraint, latencia CPU Q4_K_M ~756 ms (<1 s). Ver reports/fase4_5_gemma270m.md.
 
 DoD: cada peldaño entrenado termina en la 5070 Ti sin OOM, con su informe de recursos (sección 3) y su evaluación adjunta.
 
