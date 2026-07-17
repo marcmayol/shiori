@@ -52,10 +52,14 @@ def _candidates(registry: Registry) -> list[RoutingDecision]:
     return [RoutingDecision(mode=mode, model_id=mid) for mode in Mode for mid in registry.model_ids]
 
 
-def constrained_decision(
+def constrained_scores(
     model: Any, tokenizer: Any, messages: list[Message], registry: Registry
-) -> RoutingDecision:
-    """Elige la decisión válida de mayor log-prob (constraint por scoring)."""
+) -> list[tuple[RoutingDecision, float]]:
+    """Log-prob (normalizado por longitud) de cada decisión válida del registro.
+
+    Un solo forward; el lm_head se aplica solo en las posiciones de la completion.
+    Base para el argmax y para la calibración con prior a PLAN.
+    """
     prompt = _prompt_ids(tokenizer, messages)
     candidates = _candidates(registry)
 
@@ -78,15 +82,19 @@ def constrained_decision(
         tail = hidden[:, plen - 1 :, :]  # tail[:, t] predice el token en plen+t
         log_probs = torch.log_softmax(model.lm_head(tail).float(), dim=-1)
 
-    best_idx = 0
-    best_score = float("-inf")
+    scored: list[tuple[RoutingDecision, float]] = []
     for i, comp_len in enumerate(comp_lens):
         score = 0.0
         for t in range(comp_len):
             tok = int(input_ids[i, plen + t])
             score += float(log_probs[i, t, tok])
-        score /= max(comp_len, 1)  # normaliza por longitud
-        if score > best_score:
-            best_score = score
-            best_idx = i
-    return candidates[best_idx]
+        scored.append((candidates[i], score / max(comp_len, 1)))
+    return scored
+
+
+def constrained_decision(
+    model: Any, tokenizer: Any, messages: list[Message], registry: Registry
+) -> RoutingDecision:
+    """Elige la decisión válida de mayor log-prob (constraint por scoring)."""
+    scored = constrained_scores(model, tokenizer, messages, registry)
+    return max(scored, key=lambda ds: ds[1])[0]
