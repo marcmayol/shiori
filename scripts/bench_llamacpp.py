@@ -18,9 +18,7 @@ import argparse
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
-from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOME = Path.home()
@@ -33,53 +31,42 @@ def _force_utf8_stdout() -> None:
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+    )
 
 
-def _build_prompt(checkpoint: Path, test_path: Path) -> str:
-    """Construye el texto de prompt de un ejemplo real con la plantilla del modelo."""
-    from transformers import AutoTokenizer
+PROMPT_TOKENS = 320  # tamaño representativo (registro ~250 + tarea)
+GEN_TOKENS = 24  # una decisión JSON
 
-    from routerpolicy.training.data import load_rows, prompt_messages
-    from routerpolicy.training.prepare import ensure_chat_template, merge_system_into_user
-
-    tok: Any = AutoTokenizer.from_pretrained(str(checkpoint))
-    ensure_chat_template(tok)
-    row = load_rows(test_path, limit=1)[0]
-    prepared = merge_system_into_user(prompt_messages(row))
-    return str(tok.apply_chat_template(prepared, tokenize=False, add_generation_prompt=True))
+# fila de llama-bench: "| ... | testNNN | t/s ± err |" (sin depender del ±)
+_ROW_RE = re.compile(r"\|\s*(pp|tg)(\d+)\s*\|\s*([\d.]+)")
 
 
-_TOTAL_RE = re.compile(r"total time\s*=\s*([\d.]+)\s*ms")
-
-
-def _bench_one(llama_cli: Path, gguf: Path, prompt_file: Path, threads: int, repeats: int) -> float:
-    """Latencia mediana (ms) de generar una decisión (~24 tokens) en CPU."""
-    times: list[float] = []
-    for _ in range(repeats):
-        t0 = time.perf_counter()
-        proc = _run(
-            [
-                str(llama_cli),
-                "-m",
-                str(gguf),
-                "-f",
-                str(prompt_file),
-                "-n",
-                "24",
-                "-t",
-                str(threads),
-                "--no-display-prompt",
-                "-no-cnv",
-                "--temp",
-                "0",
-            ]
-        )
-        wall = (time.perf_counter() - t0) * 1000
-        match = _TOTAL_RE.search(proc.stderr)
-        times.append(float(match.group(1)) if match else wall)
-    times.sort()
-    return times[len(times) // 2]
+def _bench_one(llama_bench: Path, gguf: Path, threads: int) -> float:
+    """Latencia (ms) de una decisión en CPU: prompt + generación, vía llama-bench."""
+    proc = _run(
+        [
+            str(llama_bench),
+            "-m",
+            str(gguf),
+            "-t",
+            str(threads),
+            "-p",
+            str(PROMPT_TOKENS),
+            "-n",
+            str(GEN_TOKENS),
+        ]
+    )
+    pp_tps = tg_tps = 0.0
+    for kind, _n, tps in _ROW_RE.findall(proc.stdout):
+        if kind == "pp":
+            pp_tps = float(tps)
+        elif kind == "tg":
+            tg_tps = float(tps)
+    if pp_tps <= 0 or tg_tps <= 0:
+        return -1.0
+    return (PROMPT_TOKENS / pp_tps + GEN_TOKENS / tg_tps) * 1000
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         "Q4_K_M": args.gguf_dir / "shiori-270m-Q4_K_M.gguf",
     }
     quantize = args.llama_bin / "llama-quantize.exe"
-    llama_cli = args.llama_bin / "llama-cli.exe"
+    llama_bench = args.llama_bin / "llama-bench.exe"
 
     if not f16.exists():
         print("convirtiendo a GGUF f16...", flush=True)
@@ -124,17 +111,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"cuantizando {name}...", flush=True)
             _run([str(quantize), str(f16), str(path), name])
 
-    prompt_file = args.gguf_dir / "sample_prompt.txt"
-    prompt_file.write_text(_build_prompt(args.checkpoint, args.test), encoding="utf-8")
-
     print(f"\n===== LATENCIA llama.cpp (CPU, {args.threads} hilos) =====", flush=True)
+    print(f"  (decisión = {PROMPT_TOKENS} tokens de prompt + {GEN_TOKENS} de salida)")
     for name, path in quants.items():
         if not path.exists():
             print(f"  {name}: no generado")
             continue
-        median = _bench_one(llama_cli, path, prompt_file, args.threads, args.repeats)
+        latency = _bench_one(llama_bench, path, args.threads)
         size_mb = path.stat().st_size / (1024**2)
-        print(f"  {name:<8} {size_mb:6.0f} MB   latencia/decisión ≈ {median:.0f} ms")
+        budget = "OK <1s" if 0 < latency < 1000 else "EXCEDE"
+        print(f"  {name:<8} {size_mb:6.0f} MB   latencia/decisión ≈ {latency:.0f} ms  [{budget}]")
     return 0
 
 
