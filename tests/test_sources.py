@@ -25,12 +25,12 @@ HUMANEVAL_REC = {
     "canonical_solution": "    return a + b\n",
 }
 
+# Esquema evalplus MBPP+: prompt + entry_point + assertion (asserts directos).
 MBPP_REC = {
-    "task_id": 601,
-    "text": "Write a function to add two numbers.",
-    "code": "def add(a, b):\n    return a + b",
-    "test_list": ["assert add(2, 3) == 5", "assert add(-1, 1) == 0"],
-    "test_setup_code": "",
+    "task_id": "Mbpp/601",
+    "prompt": "Write a function to add two numbers.",
+    "entry_point": "add",
+    "assertion": "assert add(2, 3) == 5\nassert add(-1, 1) == 0\n",
 }
 
 XLAM_REC = {
@@ -44,16 +44,17 @@ def test_humaneval_mapper_and_verification() -> None:
     task = code_task_from_humaneval(HUMANEVAL_REC)
     assert task.source is TaskSource.HUMANEVAL_PLUS
     assert task.entry_point == "add"
-    assert task.task_id == "humaneval/HumanEval/0"
+    assert task.task_id == "HumanEval/0"
     # el test reconstruido pasa con una implementación correcta y falla con una mala
     assert verify_code("def add(a, b):\n    return a + b", task.test_code).passed
     assert not verify_code("def add(a, b):\n    return a - b", task.test_code).passed
 
 
-def test_mbpp_mapper_derives_entry_point_and_verifies() -> None:
+def test_mbpp_mapper_and_verifies() -> None:
     task = code_task_from_mbpp(MBPP_REC)
     assert task.source is TaskSource.MBPP_PLUS
     assert task.entry_point == "add"
+    assert task.task_id == "Mbpp/601"
     assert verify_code("def add(a, b):\n    return a + b", task.test_code).passed
     assert not verify_code("def add(a, b):\n    return 0", task.test_code).passed
 

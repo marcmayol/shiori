@@ -12,26 +12,25 @@ mapeadores puros SÍ están testeados y son el punto de verdad del formato.
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from routerpolicy.harness.tasks import ChatTask, CodeTask, TaskSource, ToolTask
 
 # ----------------------------- mapeadores puros -----------------------------
-
-_DEF_NAME = re.compile(r"assert\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+#
+# Esquema real de evalplus (validado en la descarga):
+#   HumanEval+: {task_id, prompt, entry_point, test (def check(candidate)), ...}
+#   MBPP+:      {task_id, prompt, entry_point, assertion (asserts directos), ...}
+# El task_id ya viene namespaced ("HumanEval/0", "Mbpp/2").
 
 
 def code_task_from_humaneval(rec: dict[str, Any]) -> CodeTask:
-    """openai_humaneval: {task_id, prompt, entry_point, test, canonical_solution}.
-
-    El campo `test` define `check(candidate)`; el test ejecutable lo invoca con
-    el entry_point.
-    """
+    """HumanEval+: el campo `test` define `check(candidate)`; se invoca con el
+    entry_point para obtener un script ejecutable."""
     entry_point = str(rec["entry_point"])
     test_code = f"{rec['test']}\n\ncheck({entry_point})\n"
     return CodeTask(
-        task_id=f"humaneval/{rec['task_id']}",
+        task_id=str(rec["task_id"]),
         source=TaskSource.HUMANEVAL_PLUS,
         prompt=str(rec["prompt"]),
         entry_point=entry_point,
@@ -40,27 +39,14 @@ def code_task_from_humaneval(rec: dict[str, Any]) -> CodeTask:
 
 
 def code_task_from_mbpp(rec: dict[str, Any]) -> CodeTask:
-    """mbpp: {task_id, text, code, test_list, test_setup_code}.
-
-    entry_point se deriva del primer assert; el test ejecutable concatena el
-    setup y los asserts.
-    """
-    test_list = list(rec.get("test_list", []))
-    setup = str(rec.get("test_setup_code", "") or "")
-    entry_point = "candidate"
-    for assertion in test_list:
-        m = _DEF_NAME.search(str(assertion))
-        if m:
-            entry_point = m.group(1)
-            break
-    body = "\n".join(str(a) for a in test_list)
-    test_code = f"{setup}\n{body}\n" if setup else f"{body}\n"
+    """MBPP+: el campo `assertion` son asserts directos que llaman al
+    entry_point; sirven de verificación mecánica tal cual."""
     return CodeTask(
-        task_id=f"mbpp/{rec['task_id']}",
+        task_id=str(rec["task_id"]),
         source=TaskSource.MBPP_PLUS,
-        prompt=str(rec["text"]),
-        entry_point=entry_point,
-        test_code=test_code,
+        prompt=str(rec["prompt"]),
+        entry_point=str(rec["entry_point"]),
+        test_code=str(rec["assertion"]),
     )
 
 
