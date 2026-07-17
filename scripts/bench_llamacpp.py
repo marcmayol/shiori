@@ -117,9 +117,7 @@ def main(argv: list[str] | None = None) -> int:
             _run([str(quantize), str(f16), str(path), name])
 
     llama_bench_cuda = args.llama_bin_cuda / "llama-bench.exe"
-    print(
-        f"\n===== LATENCIA llama.cpp (decisión = {PROMPT_TOKENS} prompt + {GEN_TOKENS} salida) ====="
-    )
+    print(f"\n===== LATENCIA llama.cpp (decisión = {PROMPT_TOKENS}+{GEN_TOKENS} tokens) =====")
     print(f"  {'cuant':<8}{'tamaño':>9}{'CPU 8h':>12}{'GPU':>10}   presupuesto")
     for name, path in quants.items():
         if not path.exists():
