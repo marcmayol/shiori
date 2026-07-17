@@ -90,6 +90,27 @@ def test_label_mode_rule_and_judge() -> None:
     assert rec2.mode is Mode.PLAN and rec2.mode_source is Provenance.JUDGE
 
 
+class _FailingJudge:
+    """Juez que siempre falla (para probar la resiliencia del run de modo)."""
+
+    def judge(self, task_prompt: str) -> Mode:
+        raise RuntimeError("judge boom")
+
+
+def test_mode_labeling_skips_judge_failures(tmp_path: Path) -> None:
+    # una tarea factual (regla -> DIRECT) y otra que necesita juez (falla).
+    tasks: list[ToolTask | ChatTask] = [
+        ChatTask(task_id="factual", source=TaskSource.DOLLY, prompt="Who wrote Hamlet?"),
+        ChatTask(task_id="hard", source=TaskSource.DOLLY, prompt="Compare and contrast X and Y."),
+    ]
+    out = tmp_path / "mode.jsonl"
+    # la regla resuelve la factual; la otra va al juez, que falla -> se salta.
+    n = run_mode_labeling(tasks, _FailingJudge(), out)
+    assert n == 1
+    records = load_jsonl(out, ModeRecord)
+    assert [r.task_id for r in records] == ["factual"]
+
+
 def test_mode_labeling_resumes(tmp_path: Path) -> None:
     tasks: list[ToolTask | ChatTask] = [
         ToolTask(task_id=f"t{i}", source=TaskSource.XLAM, prompt="x", tool_names=("f",))

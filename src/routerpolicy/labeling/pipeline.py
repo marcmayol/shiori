@@ -8,6 +8,7 @@ reanudar se saltan las tareas ya presentes.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -106,14 +107,27 @@ def run_mode_labeling(
     out_path: Path,
     resume: bool = True,
 ) -> int:
-    """Etiqueta modo por tarea, anexando incrementalmente. Devuelve nº nuevos."""
+    """Etiqueta modo por tarea, anexando incrementalmente. Devuelve nº nuevos.
+
+    Resiliente: si el juez falla en una tarea (tras sus reintentos), se salta y
+    el run continúa; se reintentará en la próxima reanudación.
+    """
     skip = done_task_ids(out_path) if resume else set()
     processed = 0
+    skipped = 0
     for task in tasks:
         if task.task_id in skip:
             continue
-        _append_record(out_path, label_mode(task, judge))
+        try:
+            record = label_mode(task, judge)
+        except Exception as exc:  # el juez agotó reintentos: saltar, no crashear
+            skipped += 1
+            print(f"  [skip] {task.task_id}: {exc}", file=sys.stderr, flush=True)
+            continue
+        _append_record(out_path, record)
         processed += 1
+    if skipped:
+        print(f"  ({skipped} tareas saltadas por fallo del juez)", file=sys.stderr, flush=True)
     return processed
 
 

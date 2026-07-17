@@ -61,14 +61,25 @@ class ModeJudge(Protocol):
 
 
 class LlmModeJudge:
-    """Juez respaldado por un ModelRunner (modelo capaz vía API/local)."""
+    """Juez respaldado por un ModelRunner (modelo capaz vía API/local).
 
-    def __init__(self, runner: ModelRunner) -> None:
+    Reintenta si el modelo no devuelve JSON parseable (un modelo local puede
+    fallar el formato de vez en cuando).
+    """
+
+    def __init__(self, runner: ModelRunner, max_attempts: int = 3) -> None:
         self._runner = runner
+        self._max_attempts = max_attempts
 
     def judge(self, task_prompt: str) -> Mode:
-        completion = self._runner.complete(build_judge_prompt(task_prompt))
-        return parse_judge_output(completion.text)
+        prompt = build_judge_prompt(task_prompt)
+        last_error: Exception | None = None
+        for _ in range(self._max_attempts):
+            try:
+                return parse_judge_output(self._runner.complete(prompt).text)
+            except Exception as exc:
+                last_error = exc
+        raise JudgeError(f"juez falló tras {self._max_attempts} intentos: {last_error}")
 
 
 class FakeJudge:
