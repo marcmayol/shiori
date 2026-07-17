@@ -72,12 +72,12 @@ DoD: `uv run pytest` en verde; script `check_env` reporta GPU y VRAM.
 
 ## Fase 1: Esquema de datos y formato de entrenamiento
 
-- [ ] `ModelSpec` (pydantic): id, tags de capacidades, context_window, coste relativo, locality, supports_tools
-- [ ] `render_registry_prompt(registry) -> str`: render determinista y COMPACTO (una línea por modelo); test golden-file y test de presupuesto (≤ 1000 tokens con 8 modelos)
-- [ ] Formato de ejemplo chat: system fijo y corto, user = registro renderizado + tarea, assistant = `{"mode", "model_id"}`
-- [ ] `Label` con procedencia: cómo se obtuvo (verificación real | juez | regla), scores de la corrida, `schema_version`
-- [ ] Validadores del JSON de salida (mode válido, model_id existe en el registro del propio ejemplo)
-- [ ] Gramática/regex del decoding constreñido generada a partir del registro de cada ejemplo; test de que solo admite salidas válidas
+- [x] `ModelSpec` (pydantic): id, tags de capacidades, context_window, coste relativo, locality, supports_tools
+- [x] `render_registry_prompt(registry) -> str`: render determinista y COMPACTO (una línea por modelo); test golden-file y test de presupuesto (≤ 1000 tokens con 8 modelos)
+- [x] Formato de ejemplo chat: system fijo y corto, user = registro renderizado + tarea, assistant = `{"mode", "model_id"}`
+- [x] `Label` con procedencia: cómo se obtuvo (verificación real | juez | regla), scores de la corrida, `schema_version`
+- [x] Validadores del JSON de salida (mode válido, model_id existe en el registro del propio ejemplo)
+- [x] Gramática/regex del decoding constreñido generada a partir del registro de cada ejemplo; test de que solo admite salidas válidas
 
 DoD: 5 ejemplos construidos a mano pasan la validación de esquema y la gramática de punta a punta.
 

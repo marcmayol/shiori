@@ -1,0 +1,4 @@
+Available models:
+- local-mini | tags:code,general | ctx:8192 | cost:1 | loc:local | tools:no
+- local-med | tags:code,reasoning,tools | ctx:32768 | cost:3 | loc:local | tools:yes
+- api-large | tags:code,reasoning,plan,tools,general | ctx:200000 | cost:20 | loc:api | tools:yes
