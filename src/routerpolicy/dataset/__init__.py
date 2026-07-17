@@ -12,6 +12,8 @@ from routerpolicy.dataset.sources import (
     code_task_from_mbpp,
     ingest_humaneval_plus,
     ingest_mbpp_plus,
+    ingest_wildchat,
+    ingest_xlam,
     tool_task_from_xlam,
 )
 from routerpolicy.dataset.tasks_io import load_jsonl, write_jsonl
@@ -26,6 +28,8 @@ __all__ = [
     "code_task_from_mbpp",
     "ingest_humaneval_plus",
     "ingest_mbpp_plus",
+    "ingest_wildchat",
+    "ingest_xlam",
     "load_jsonl",
     "tool_task_from_xlam",
     "write_jsonl",

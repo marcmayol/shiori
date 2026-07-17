@@ -119,3 +119,32 @@ def ingest_mbpp_plus(limit: int | None = None) -> list[CodeTask]:
     problems = get_mbpp_plus()
     tasks = [code_task_from_mbpp(dict(p)) for p in problems.values()]
     return tasks[:limit] if limit is not None else tasks
+
+
+def ingest_xlam(limit: int | None = None) -> list[ToolTask]:
+    """Carga xLAM function-calling vía datasets streaming (extra `label`, gated)."""
+    from datasets import load_dataset
+
+    ds = load_dataset("Salesforce/xlam-function-calling-60k", split="train", streaming=True)
+    tasks: list[ToolTask] = []
+    for rec in ds:
+        tasks.append(tool_task_from_xlam(dict(rec)))
+        if limit is not None and len(tasks) >= limit:
+            break
+    return tasks
+
+
+def ingest_wildchat(limit: int | None = None) -> list[ChatTask]:
+    """Carga WildChat filtrado vía datasets streaming (extra `label`, gated)."""
+    from datasets import load_dataset
+
+    ds = load_dataset("allenai/WildChat-1M", split="train", streaming=True)
+    tasks: list[ChatTask] = []
+    for rec in ds:
+        task = chat_task_from_wildchat(dict(rec))
+        if task is None:
+            continue
+        tasks.append(task)
+        if limit is not None and len(tasks) >= limit:
+            break
+    return tasks

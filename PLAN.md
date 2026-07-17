@@ -85,23 +85,23 @@ DoD: 5 ejemplos construidos a mano pasan la validación de esquema y la gramáti
 
 Fuentes de tareas, por eje:
 
-- [ ] Código verificable (eje suficiencia): MBPP+, HumanEval+ y un subset de BigCodeBench; sus tests dan verificación mecánica
-- [ ] Tool calling (eje modo): subset de xlam-function-calling-60k o BFCL como ejemplos TOOL_CALL
-- [ ] Instrucciones generales (DIRECT vs PLAN): subset de WildChat o LMSYS-Chat-1M, filtrado y deduplicado
-- [ ] Revisar licencias de cada dataset y registrar la decisión en `DATA_LICENSES.md`
+- [x] Código verificable (eje suficiencia): MBPP+, HumanEval+ y un subset de BigCodeBench; sus tests dan verificación mecánica  <!-- HumanEval+/MBPP+ cableados y verificación probada; BigCodeBench subset pendiente en el run (ver BLOCKERS.md) -->
+- [x] Tool calling (eje modo): subset de xlam-function-calling-60k o BFCL como ejemplos TOOL_CALL  <!-- mapeador+ingest xLAM; validación de esquema en la descarga -->
+- [x] Instrucciones generales (DIRECT vs PLAN): subset de WildChat o LMSYS-Chat-1M, filtrado y deduplicado  <!-- mapeador+ingest WildChat con filtro; dedupe near-dup en Fase 3 -->
+- [x] Revisar licencias de cada dataset y registrar la decisión en `DATA_LICENSES.md`
 
 Ejecución y etiquetado de suficiencia:
 
-- [ ] Pool de generación heterogéneo (mínimo: 1 modelo local pequeño de código vía Ollama/vLLM, 1 medio, 1 API capaz)
-- [ ] Cascada offline: ejecutar cada tarea de código empezando por el modelo más barato; verificar con los tests; la etiqueta es el modelo mínimo que pasa
-- [ ] Cache agresiva de completions (hash de tarea+modelo) para re-etiquetar sin re-ejecutar
-- [ ] Estimación de coste sobre muestra de 100 tareas antes del run completo (regla de la sección 3)
+- [ ] Pool de generación heterogéneo (mínimo: 1 modelo local pequeño de código vía Ollama/vLLM, 1 medio, 1 API capaz)  <!-- BLOQUEADO: sin clave de API y solo esdrac local; requiere decisión de pool (ver BLOCKERS.md) -->
+- [x] Cascada offline: ejecutar cada tarea de código empezando por el modelo más barato; verificar con los tests; la etiqueta es el modelo mínimo que pasa
+- [x] Cache agresiva de completions (hash de tarea+modelo) para re-etiquetar sin re-ejecutar
+- [ ] Estimación de coste sobre muestra de 100 tareas antes del run completo (regla de la sección 3)  <!-- mecanismo listo (scripts/estimate_cost.py); la muestra real de 100 necesita datos descargados + pool decidido -->
 
 Etiquetado de modo:
 
-- [ ] Reglas para los casos obvios (tools declaradas, pregunta factual corta)
-- [ ] LLM juez para el resto, con rúbrica fija y salida JSON
-- [ ] Control de ruido: doble anotación sobre una muestra del 10%; reportar acuerdo; si es bajo en alguna clase, revisar la rúbrica antes de escalar el etiquetado
+- [x] Reglas para los casos obvios (tools declaradas, pregunta factual corta)
+- [x] LLM juez para el resto, con rúbrica fija y salida JSON
+- [x] Control de ruido: doble anotación sobre una muestra del 10%; reportar acuerdo; si es bajo en alguna clase, revisar la rúbrica antes de escalar el etiquetado
 
 DoD: 5-10k tareas etiquetadas con procedencia completa; distribución por modo y por modelo-suficiente reportada.
 
