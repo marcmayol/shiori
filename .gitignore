@@ -39,3 +39,4 @@ completions_cache/
 Thumbs.db
 .vscode/
 .idea/
+artifacts/
