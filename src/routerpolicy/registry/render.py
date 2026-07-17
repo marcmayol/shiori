@@ -63,7 +63,10 @@ def parse_registry_prompt(rendered: str) -> Registry:
     """Inverso de `render_registry_prompt`: reconstruye el Registry.
 
     Necesario en evaluación/inferencia para recuperar ids y costes del registro
-    embebido en el prompt (decoding constreñido y regret de coste).
+    embebido en el prompt (decoding constreñido y regret de coste). Acepta tanto
+    el render puro como el mensaje de usuario completo (registro + tarea): solo
+    parsea el bloque del registro, ignorando la tarea (que puede tener viñetas).
     """
-    lines = [ln for ln in rendered.splitlines() if ln.startswith("- ")]
+    head = rendered.split("\nTask:", 1)[0]  # descarta la sección de la tarea
+    lines = [ln for ln in head.splitlines() if ln.startswith("- ") and " | tags:" in ln]
     return Registry(models=tuple(_parse_model_line(ln) for ln in lines))

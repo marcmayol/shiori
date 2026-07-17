@@ -13,6 +13,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 import time
 from pathlib import Path
@@ -77,8 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     model.to("cuda")
     model.eval()
 
-    rows = load_rows(args.test, limit=args.sample)
-    print(f"evaluando {len(rows)} ejemplos del test (pools no vistos)", flush=True)
+    all_rows = load_rows(args.test)
+    random.Random(20260717).shuffle(all_rows)  # muestra representativa de todos los modos
+    rows = all_rows[: args.sample]
+    print(f"evaluando {len(rows)} ejemplos del test (pools no vistos, barajado)", flush=True)
 
     golds: list[RoutingDecision] = []
     pred_uncon: list[RoutingDecision | None] = []

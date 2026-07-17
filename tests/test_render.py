@@ -48,3 +48,14 @@ def test_parse_registry_roundtrip(golden_registry: Registry) -> None:
         assert restored.cost == original.cost
         assert restored.locality == original.locality
         assert restored.supports_tools == original.supports_tools
+
+
+def test_parse_registry_ignores_task_bullets(golden_registry: Registry) -> None:
+    from routerpolicy.dataset.format import build_user_message
+    from routerpolicy.registry.render import parse_registry_prompt
+
+    # tarea con viñetas markdown que NO deben confundirse con modelos
+    task = "Categorize:\n- apple\n- banana\ninto fruit."
+    user_msg = build_user_message(golden_registry, task)
+    parsed = parse_registry_prompt(user_msg)
+    assert parsed.model_ids == golden_registry.model_ids
