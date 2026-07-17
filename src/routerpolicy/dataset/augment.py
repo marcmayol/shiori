@@ -96,6 +96,7 @@ class AugmentedExample:
     decision: RoutingDecision
     difficulty: int
     n_models: int
+    signature: PoolSignature  # firma estructural del pool (para leakage)
 
 
 def augment_task(
@@ -114,7 +115,8 @@ def augment_task(
     while len(out) < factor and attempts < factor * 20:
         attempts += 1
         pool = generate_pool(rng)
-        if allow_signature is not None and not allow_signature(pool_signature(pool)):
+        signature = pool_signature(pool)
+        if allow_signature is not None and not allow_signature(signature):
             continue
         decision = label_for_pool(task, pool)
         registry = Registry(models=tuple(sm.spec for sm in pool))
@@ -127,6 +129,7 @@ def augment_task(
                 decision=decision,
                 difficulty=task.difficulty,
                 n_models=len(pool),
+                signature=signature,
             )
         )
     return out
