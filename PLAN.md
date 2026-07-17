@@ -86,8 +86,8 @@ DoD: 5 ejemplos construidos a mano pasan la validación de esquema y la gramáti
 Fuentes de tareas, por eje:
 
 - [x] Código verificable (eje suficiencia): MBPP+, HumanEval+ y un subset de BigCodeBench; sus tests dan verificación mecánica  <!-- HumanEval+/MBPP+ cableados y verificación probada; BigCodeBench subset pendiente en el run (ver BLOCKERS.md) -->
-- [x] Tool calling (eje modo): subset de xlam-function-calling-60k o BFCL como ejemplos TOOL_CALL  <!-- mapeador+ingest xLAM; validación de esquema en la descarga -->
-- [x] Instrucciones generales (DIRECT vs PLAN): subset de WildChat o LMSYS-Chat-1M, filtrado y deduplicado  <!-- mapeador+ingest WildChat con filtro; dedupe near-dup en Fase 3 -->
+- [x] Tool calling (eje modo): subset de xlam-function-calling-60k o BFCL como ejemplos TOOL_CALL  <!-- xLAM gated; se usó Hermes function-calling (no-gated): 2279 TOOL_CALL. Ver DATA_LICENSES.md -->
+- [x] Instrucciones generales (DIRECT vs PLAN): subset de WildChat o LMSYS-Chat-1M, filtrado y deduplicado  <!-- WildChat/LMSYS gated; se usó Dolly-15k (no-gated); dedupe near-dup en Fase 3 -->
 - [x] Revisar licencias de cada dataset y registrar la decisión en `DATA_LICENSES.md`
 
 Ejecución y etiquetado de suficiencia:
