@@ -109,11 +109,13 @@ DoD: 5-10k tareas etiquetadas con procedencia completa; distribución por modo y
 
 En el rango mini la augmentación sube de importancia: es lo que sustituye a la capacidad general del base.
 
-- [ ] Generador de pools sintéticos: variar número de modelos (2-8), ids y nombres (aleatorizados para impedir memorización de marcas), tags, costes, tiers y orden de render; formato SIEMPRE idéntico
-- [ ] Recalcular la etiqueta por pool: si el modelo mínimo suficiente no está en el pool sintético, la etiqueta pasa al siguiente suficiente presente; si ninguno es suficiente, etiqueta = el más capaz del pool
-- [ ] Factor de augmentación 5-8x por ejemplo base, con límite de repetición de la misma tarea
-- [ ] Dedupe near-duplicate de tareas (minhash o embeddings) ANTES del split para evitar leakage
-- [ ] Splits estratificados por modo y dificultad; test set congelado que además incluye SOLO composiciones de pool nunca vistas en train
+- [x] Generador de pools sintéticos: variar número de modelos (2-8), ids y nombres (aleatorizados para impedir memorización de marcas), tags, costes, tiers y orden de render; formato SIEMPRE idéntico  <!-- registry/synthetic.py: capacidad oculta codificada en tags recuperables -->
+- [x] Recalcular la etiqueta por pool: si el modelo mínimo suficiente no está en el pool sintético, la etiqueta pasa al siguiente suficiente presente; si ninguno es suficiente, etiqueta = el más capaz del pool  <!-- dataset/augment.py: label_for_pool -->
+- [x] Factor de augmentación 5-8x por ejemplo base, con límite de repetición de la misma tarea  <!-- factor 9 (mínimo para 50k tras dedup de 703 near-dups); ver reports/fase3_dataset.md -->
+- [x] Dedupe near-duplicate de tareas (minhash o embeddings) ANTES del split para evitar leakage  <!-- dataset/dedup.py: MinHash+LSH sin deps -->
+- [x] Splits estratificados por modo y dificultad; test set congelado que además incluye SOLO composiciones de pool nunca vistas en train  <!-- dataset/splits.py: firmas de pool reservadas al test -->
+
+Resultado: 50 110 filas (45 135 train / 4 975 test), leakage limpio (0/0). Ver reports/fase3_dataset.md.
 
 DoD: dataset final 50-120k filas; informe de balance por clase; test de leakage en verde.
 

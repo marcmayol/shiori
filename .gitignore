@@ -23,6 +23,10 @@ data/*
 !data/labels/
 data/labels/*
 !data/labels/*.jsonl
+# ...y el TEST SET congelado (intocable, sección 2); el train grande es regenerable
+!data/dataset/
+data/dataset/*
+!data/dataset/test.jsonl
 checkpoints/
 *.gguf
 *.safetensors
