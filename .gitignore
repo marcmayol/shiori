@@ -40,3 +40,6 @@ Thumbs.db
 .vscode/
 .idea/
 artifacts/
+
+# Secretos locales (claves de API) — NUNCA se versionan
+.secrets/
