@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from routerpolicy.harness.runner import ModelRunner, extract_code
+from routerpolicy.harness.runner import Completion, ModelRunner, extract_code
 from routerpolicy.harness.tasks import CodeTask
 from routerpolicy.harness.verify import DEFAULT_TIMEOUT_S, verify_code
 
@@ -36,6 +36,7 @@ class CascadeAttempt:
     error: str | None
     prompt_tokens: int
     completion_tokens: int
+    errored: bool = False  # True si falló la INFRA (timeout/red), no la verificación
 
 
 @dataclass(frozen=True)
@@ -51,21 +52,53 @@ class CascadeResult:
         return self.sufficient_model_id is not None
 
 
+def _complete_with_retry(
+    runner: ModelRunner, prompt: str, max_attempts: int
+) -> tuple[Completion | None, str | None]:
+    """Intenta la completion con reintentos. Devuelve (completion|None, error).
+
+    Un timeout/red suele resolverse al reintentar (el modelo ya quedó cargado en
+    VRAM tras el primer intento fallido).
+    """
+    last_error: str | None = None
+    for _ in range(max_attempts):
+        try:
+            return runner.complete(prompt), None
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+    return None, last_error
+
+
 def run_cascade(
     task: CodeTask,
     runners: list[ModelRunner],
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    max_attempts: int = 2,
 ) -> CascadeResult:
     """Ejecuta la cascada sobre una tarea.
 
     `runners` DEBE venir ordenado de más barato a más capaz. Se detiene en el
-    primer modelo que pasa la verificación (no ejecuta los más caros).
+    primer modelo que pasa la verificación (no ejecuta los más caros). Si un
+    modelo falla de INFRA (timeout/red) tras los reintentos, se marca `errored`
+    y se escala al siguiente en vez de abortar el run.
     """
     prompt = build_code_prompt(task)
     attempts: list[CascadeAttempt] = []
     sufficient: str | None = None
     for runner in runners:
-        completion = runner.complete(prompt)
+        completion, infra_error = _complete_with_retry(runner, prompt, max_attempts)
+        if completion is None:
+            attempts.append(
+                CascadeAttempt(
+                    model_id=runner.model_id,
+                    passed=False,
+                    error=infra_error,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    errored=True,
+                )
+            )
+            continue  # escala al siguiente tier
         candidate = extract_code(completion.text)
         result = verify_code(candidate, task.test_code, timeout_s=timeout_s)
         attempts.append(

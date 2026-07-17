@@ -22,10 +22,10 @@ DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_CACHE_DIR = "data/completions_cache"
 
 
-def _build_inner(tier: dict[str, Any], host: str) -> ModelRunner:
+def _build_inner(tier: dict[str, Any], host: str, timeout: float) -> ModelRunner:
     backend = str(tier.get("backend", "ollama"))
     if backend == "ollama":
-        return OllamaRunner(str(tier["id"]), host=host)
+        return OllamaRunner(str(tier["id"]), host=host, timeout=timeout)
     if backend == "openai_compat":
         key_env = str(tier["api_key_env"])
         api_key = os.environ.get(key_env)
@@ -45,11 +45,12 @@ def load_pool(path: Path, cache_dir: Path | None = None) -> list[ModelRunner]:
     if not isinstance(data, dict) or "tiers" not in data:
         raise ValueError("la config de pool debe tener 'tiers'")
     host = str(data.get("host", DEFAULT_HOST))
+    timeout = float(data.get("timeout", 300.0))
     resolved_cache = cache_dir or Path(str(data.get("cache_dir", DEFAULT_CACHE_DIR)))
     cache = CompletionCache(resolved_cache)
     runners: list[ModelRunner] = []
     for tier in data["tiers"]:
-        runners.append(CachingRunner(_build_inner(tier, host), cache))
+        runners.append(CachingRunner(_build_inner(tier, host, timeout), cache))
     if not runners:
         raise ValueError("la config de pool no define ningún tier")
     return runners

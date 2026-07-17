@@ -6,6 +6,9 @@
 # offline para obtener la verdad de referencia de suficiencia.
 cache_dir: data/completions_cache
 host: http://localhost:11434
+# Timeout HTTP por llamada (s). Alto para tolerar la recarga de modelos grandes
+# en VRAM cuando la cascada escala entre tiers.
+timeout: 300
 tiers:
   - id: qwen2.5-coder:1.5b
     backend: ollama

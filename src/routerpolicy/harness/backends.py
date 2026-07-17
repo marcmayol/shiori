@@ -46,7 +46,7 @@ class OllamaRunner:
         self,
         model: str,
         host: str = "http://localhost:11434",
-        timeout: float = 120.0,
+        timeout: float = 300.0,
         post: PostJson = urllib_post_json,
     ) -> None:
         self._model = model

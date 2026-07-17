@@ -58,3 +58,35 @@ def test_attempts_carry_token_counts() -> None:
     att = result.attempts[0]
     assert att.prompt_tokens > 0
     assert att.completion_tokens > 0
+
+
+class _RaisingRunner:
+    """Runner que siempre falla de infra (simula timeout/red)."""
+
+    def __init__(self, model_id: str) -> None:
+        self._model_id = model_id
+        self.calls = 0
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
+
+    def complete(self, prompt: str):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        raise TimeoutError("boom")
+
+
+def test_infra_error_escalates_instead_of_crashing() -> None:
+    raising = _RaisingRunner("cheap")
+    good = _runner("mid", GOOD)
+    result = run_cascade(TASK, [raising, good], max_attempts=2)
+    assert result.attempts[0].errored is True
+    assert result.attempts[0].passed is False
+    assert raising.calls == 2  # reintentó antes de rendirse
+    assert result.sufficient_model_id == "mid"
+
+
+def test_all_infra_errors_yield_none_sufficient() -> None:
+    result = run_cascade(TASK, [_RaisingRunner("a"), _RaisingRunner("b")], max_attempts=1)
+    assert result.sufficient_model_id is None
+    assert all(a.errored for a in result.attempts)
