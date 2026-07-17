@@ -2,7 +2,7 @@
 
 - generate_decision: generación libre (SIN constraint); puede dar salida inválida.
 - constrained_decision: decoding constreñido efectivo por SCORING — puntúa cada
-  decisión válida del registro (enum de modos × ids del pool) por log-prob y
+  decisión válida del registro (enum de modos x ids del pool) por log-prob y
   elige la mejor. Garantiza salida válida (equivale al constraint del artefacto).
 """
 
@@ -70,19 +70,21 @@ def constrained_decision(
     pad_id = tokenizer.pad_token_id
     input_ids = torch.tensor([s + [pad_id] * (maxlen - len(s)) for s in seqs], device=model.device)
     attn = torch.tensor([[1] * len(s) + [0] * (maxlen - len(s)) for s in seqs], device=model.device)
+    plen = len(prompt)
     with torch.no_grad():
-        logits = model(input_ids=input_ids, attention_mask=attn).logits.float()
-    log_probs = torch.log_softmax(logits, dim=-1)
+        # cuerpo del modelo -> hidden; lm_head SOLO en las posiciones que predicen
+        # la completion (~25), no en las ~320 del prompt (evita OOM con vocab 262k).
+        hidden = model.model(input_ids=input_ids, attention_mask=attn).last_hidden_state
+        tail = hidden[:, plen - 1 :, :]  # tail[:, t] predice el token en plen+t
+        log_probs = torch.log_softmax(model.lm_head(tail).float(), dim=-1)
 
     best_idx = 0
     best_score = float("-inf")
-    plen = len(prompt)
     for i, comp_len in enumerate(comp_lens):
         score = 0.0
         for t in range(comp_len):
-            pos = plen + t - 1  # logit que predice el token en plen+t
             tok = int(input_ids[i, plen + t])
-            score += float(log_probs[i, pos, tok])
+            score += float(log_probs[i, t, tok])
         score /= max(comp_len, 1)  # normaliza por longitud
         if score > best_score:
             best_score = score
