@@ -1,0 +1,21 @@
+# Precios del pool de generación (USD por millón de tokens).
+#
+# ILUSTRATIVO. Estos números NO son autoritativos: hay que confirmarlos con el
+# proveedor real antes de cualquier run de pago (regla de la sección 3). Los
+# tiers van ordenados de más barato a más capaz; los locales tienen coste 0.
+#
+# El tier de API concreto (proveedor/modelo) es una decisión abierta del pool
+# de generación (no está fijada en la sección 2): se decide en el gate de coste.
+tiers:
+  - model_id: local-small-code
+    input_per_mtok: 0.0
+    output_per_mtok: 0.0
+    is_local: true
+  - model_id: local-medium
+    input_per_mtok: 0.0
+    output_per_mtok: 0.0
+    is_local: true
+  - model_id: api-capable
+    input_per_mtok: 3.0 # placeholder
+    output_per_mtok: 15.0 # placeholder
+    is_local: false

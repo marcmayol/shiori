@@ -8,6 +8,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Marc Mayol" }]
 dependencies = [
     "pydantic>=2.7",
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pytest>=8.2",
+    "types-pyyaml>=6",
 ]
 
 [build-system]
