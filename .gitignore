@@ -18,7 +18,11 @@ dist/
 runs/
 
 # Datos y artefactos pesados (se versionan aparte: DVC/HF Hub)
-data/
+data/*
+# ...pero SÍ versionamos los labels (pequeños y caros de regenerar; ~2h de cómputo)
+!data/labels/
+data/labels/*
+!data/labels/*.jsonl
 checkpoints/
 *.gguf
 *.safetensors
