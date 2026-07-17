@@ -280,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     lines.append("\nBASELINES (mismo test, con constraint salvo indicado):")
     lines.append(f"  cascada pura (siempre barato): {_fmt(m_cascade)}")
     lines.append(f"  Gemma 270M BASE zero-shot:     {_fmt(m_base_con)}")
+    lines.append(f"    (base sin constraint: invalid={m_base_unc.invalid_rate:.2f})")
     lines.append(
         f"  API zero-shot: NO EJECUTADO. Estimación 100->test ~${api_usd:.2f} "
         f"(~{api_eur:.2f} EUR). Sin clave + umbral [X] indefinido -> BLOCKERS.md"

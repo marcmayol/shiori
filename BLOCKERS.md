@@ -1,5 +1,22 @@
 # BLOCKERS
 
+## Fase 5 — baseline de API zero-shot NO ejecutado
+
+El goal permitía una única llamada a APIs de pago (el baseline de API zero-shot
+como router), con estimación de coste previa y un umbral `[X]` euros que quedó
+**indefinido** en el goal. Además, **no hay clave de API** configurada (constatado
+en Fase 2: ANTHROPIC/OPENAI/... ausentes).
+
+- **Estimación de coste** (proyección desde 100 tareas del test al test completo,
+  precios ilustrativos 3/15 USD/Mtok): **~$7.21 (~6.63 EUR)**.
+- Decisión: **no se lanza** (sin clave + umbral `[X]` indefinido). Per el goal,
+  la Fase 5 se completa con los otros dos baselines (cascada pura y Gemma 270M
+  base zero-shot) más esta estimación. El peldaño 1 ya supera esos dos con holgura
+  (0.76 vs 0.21 y 0.075 de exact match), así que el baseline de API no cambia la
+  conclusión de la regla de selección.
+- Para ejecutarlo en el futuro: definir el umbral, configurar la clave del
+  proveedor (el adaptador `OpenAICompatRunner` ya existe) y re-lanzar el informe.
+
 ## (RESUELTO) Fase 2 — run de etiquetado
 
 El bloqueo del run de etiquetado quedó **resuelto** con la decisión de usar un

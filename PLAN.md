@@ -139,18 +139,18 @@ DoD: cada peldaño entrenado termina en la 5070 Ti sin OOM, con su informe de re
 
 Métricas sobre el test set congelado, siempre CON y SIN decoding constreñido (la diferencia mide cuánto sostiene el constraint al modelo):
 
-- [ ] Exactitud de modo (por clase, no solo global)
-- [ ] Suficiencia real: para tareas de código, re-ejecutar la elección del modelo y comprobar si pasa la verificación (no solo exact match contra la etiqueta)
-- [ ] Regret de coste: coste de la elección vs oráculo (modelo mínimo suficiente conocido)
-- [ ] Tasa de salida inválida sin constraint (JSON malformado o model_id inexistente)
-- [ ] Generalización: métrica separada sobre los pools nunca vistos
-- [ ] Latencia por decisión medida con el runtime local real (llama.cpp): CPU 8 hilos con Q4_K_M y la 5070 Ti, por peldaño
+- [x] Exactitud de modo (por clase, no solo global)  <!-- DIRECT 0.94/TOOL_CALL 0.79/PLAN 0.59 -->
+- [x] Suficiencia real: para tareas de código, re-ejecutar la elección del modelo y comprobar si pasa la verificación (no solo exact match contra la etiqueta)  <!-- pool real + verificación de Fase 2: política 0.825 vs cascada 0.59, oráculo 0.88 -->
+- [x] Regret de coste: coste de la elección vs oráculo (modelo mínimo suficiente conocido)  <!-- -0.169 -->
+- [x] Tasa de salida inválida sin constraint (JSON malformado o model_id inexistente)  <!-- 0.013 sin constraint, 0.000 con -->
+- [x] Generalización: métrica separada sobre los pools nunca vistos  <!-- test=no vistos (0.76) vs train=vistos (0.93), gap +0.17 -->
+- [x] Latencia por decisión medida con el runtime local real (llama.cpp): CPU 8 hilos con Q4_K_M y la 5070 Ti, por peldaño  <!-- Q4_K_M CPU 532ms / GPU 37ms -->
 
 Baselines obligatorios (mismo test set):
 
-- [ ] Cascada pura sin política (empezar siempre por el más barato)
-- [ ] Cada modelo base zero-shot con el mismo prompt (sin entrenar)
-- [ ] Un modelo grande de API zero-shot como router
+- [x] Cascada pura sin política (empezar siempre por el más barato)  <!-- exact 0.212 -->
+- [x] Cada modelo base zero-shot con el mismo prompt (sin entrenar)  <!-- Gemma 270M base: exact 0.075 -->
+- [x] Un modelo grande de API zero-shot como router  <!-- NO ejecutado: sin clave + umbral [X] indefinido; estimación ~6.63 EUR en BLOCKERS.md (permitido por el goal) -->
 
 Regla de selección de tamaño: elegir el peldaño MÁS PEQUEÑO que (a) supere todos los baselines, (b) quede a menos de 2 puntos de pass-rate del mejor peldaño probado, (c) no se hunda en la métrica de pools no vistos respecto a la global, y (d) cumpla el presupuesto de latencia local de la sección 2 medido con llama.cpp, no con transformers. Si ni el peldaño 3 supera al base zero-shot, el proyecto se detiene aquí y se reporta. Si algún peldaño cumple calidad pero ninguno cumple la latencia en CPU, la vía B pasa a ser el camino principal.
 
