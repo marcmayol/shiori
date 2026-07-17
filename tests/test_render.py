@@ -33,3 +33,18 @@ def test_render_one_line_per_model_plus_header(golden_registry: Registry) -> Non
 def test_render_budget_8_models(big_registry: Callable[[int], Registry]) -> None:
     rendered = render_registry_prompt(big_registry(8))
     assert estimate_tokens(rendered) <= RENDER_TOKEN_BUDGET
+
+
+def test_parse_registry_roundtrip(golden_registry: Registry) -> None:
+    from routerpolicy.registry.render import parse_registry_prompt
+
+    rendered = render_registry_prompt(golden_registry)
+    parsed = parse_registry_prompt(rendered)
+    assert parsed.model_ids == golden_registry.model_ids
+    for original, restored in zip(golden_registry.models, parsed.models, strict=True):
+        assert restored.id == original.id
+        assert restored.tags == original.tags
+        assert restored.context_window == original.context_window
+        assert restored.cost == original.cost
+        assert restored.locality == original.locality
+        assert restored.supports_tools == original.supports_tools

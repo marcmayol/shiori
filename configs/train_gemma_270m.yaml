@@ -2,9 +2,9 @@
 # Base pequeña -> batch grande y varias epochs caben holgados en 16 GB (bf16).
 step_name: gemma-3-270m
 model_id: google/gemma-3-270m
-max_seq_len: 2048
+max_seq_len: 768 # cubre el máximo real (702); shape fija -> sin recompilar
 learning_rate: 2.0e-5
-per_device_train_batch_size: 16
+per_device_train_batch_size: 16 # batch 32 satura VRAM (thrashing); 16 va holgado
 gradient_accumulation_steps: 1
 num_train_epochs: 3.0
 warmup_ratio: 0.03

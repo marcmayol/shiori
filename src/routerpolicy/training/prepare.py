@@ -15,6 +15,25 @@ IGNORE_INDEX = -100
 
 Message = dict[str, str]
 
+# Plantilla de chat estilo Gemma. El base `gemma-3-270m` no trae ninguna; como
+# hacemos full fine-tune y el formato es NUESTRO contrato, lo fijamos aquí y lo
+# usamos idéntico en entrenamiento e inferencia. Espera mensajes ya sin `system`
+# (fusionado en user). Usa los tokens especiales de Gemma.
+GEMMA_CHAT_TEMPLATE = (
+    "{{ bos_token }}"
+    "{% for message in messages %}"
+    "<start_of_turn>{{ 'user' if message['role'] == 'user' else 'model' }}\n"
+    "{{ message['content'] | trim }}<end_of_turn>\n"
+    "{% endfor %}"
+    "{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}"
+)
+
+
+def ensure_chat_template(tokenizer: Any) -> None:
+    """Fija nuestra plantilla si el tokenizer no trae ninguna (base sin template)."""
+    if not getattr(tokenizer, "chat_template", None):
+        tokenizer.chat_template = GEMMA_CHAT_TEMPLATE
+
 
 def merge_system_into_user(messages: list[Message]) -> list[Message]:
     """Fusiona el turno system en el primer user (compatibilidad Gemma)."""
@@ -42,10 +61,12 @@ def tokenize_with_completion_mask(
     Solo la respuesta del assistant contribuye a la pérdida.
     """
     prepared = merge_system_into_user(messages)
-    full = tokenizer.apply_chat_template(prepared, tokenize=True, add_generation_prompt=False)
+    full = tokenizer.apply_chat_template(
+        prepared, tokenize=True, add_generation_prompt=False, return_dict=True
+    )["input_ids"]
     prompt = tokenizer.apply_chat_template(
-        _prompt_only(prepared), tokenize=True, add_generation_prompt=True
-    )
+        _prompt_only(prepared), tokenize=True, add_generation_prompt=True, return_dict=True
+    )["input_ids"]
     labels = list(full)
     n_prompt = min(len(prompt), len(labels))
     for i in range(n_prompt):
