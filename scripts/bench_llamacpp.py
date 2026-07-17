@@ -1,15 +1,15 @@
 """Latencia con el runtime local real (llama.cpp) — Fase 5/6.
 
 Convierte el checkpoint a GGUF, cuantiza a Q8_0 y Q4_K_M, y mide la latencia por
-decisión con llama-cli en CPU (8 hilos). Es la latencia que exige la sección 2
-(< 1 s en CPU), medida con llama.cpp, no con transformers.
+decisión con llama-bench en CPU (8 hilos) y GPU (CUDA, -ngl 99). Es la latencia
+que exige la sección 2 (< 1 s CPU, < 50 ms GPU), medida con llama.cpp.
 
-Requiere el repo llama.cpp (convert_hf_to_gguf.py) y los binarios (llama-quantize,
-llama-cli). Rutas por defecto: ~/llama.cpp y ~/llamacpp-bin.
+Requiere el repo llama.cpp (convert_hf_to_gguf.py), los binarios CPU
+(~/llamacpp-bin: llama-quantize, llama-bench) y CUDA (~/llamacpp-cuda).
 
 Uso:
     uv run --extra train python scripts/bench_llamacpp.py \
-        --checkpoint checkpoints/gemma-3-270m/final --threads 8
+        --checkpoint checkpoints/gemma-3-270m/final_gguf --threads 8
 """
 
 from __future__ import annotations
@@ -43,21 +43,25 @@ GEN_TOKENS = 24  # una decisión JSON
 _ROW_RE = re.compile(r"\|\s*(pp|tg)(\d+)\s*\|\s*([\d.]+)")
 
 
-def _bench_one(llama_bench: Path, gguf: Path, threads: int) -> float:
-    """Latencia (ms) de una decisión en CPU: prompt + generación, vía llama-bench."""
-    proc = _run(
-        [
-            str(llama_bench),
-            "-m",
-            str(gguf),
-            "-t",
-            str(threads),
-            "-p",
-            str(PROMPT_TOKENS),
-            "-n",
-            str(GEN_TOKENS),
-        ]
-    )
+def _bench_one(llama_bench: Path, gguf: Path, threads: int, ngl: int = 0) -> float:
+    """Latencia (ms) de una decisión: prompt + generación, vía llama-bench.
+
+    ngl>0 offloada capas a la GPU (CUDA); ngl=0 es CPU puro.
+    """
+    cmd = [
+        str(llama_bench),
+        "-m",
+        str(gguf),
+        "-t",
+        str(threads),
+        "-p",
+        str(PROMPT_TOKENS),
+        "-n",
+        str(GEN_TOKENS),
+    ]
+    if ngl > 0:
+        cmd += ["-ngl", str(ngl)]
+    proc = _run(cmd)
     pp_tps = tg_tps = 0.0
     for kind, _n, tps in _ROW_RE.findall(proc.stdout):
         if kind == "pp":
@@ -75,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--llama-repo", type=Path, default=HOME / "llama.cpp")
     parser.add_argument("--llama-bin", type=Path, default=HOME / "llamacpp-bin")
+    parser.add_argument("--llama-bin-cuda", type=Path, default=HOME / "llamacpp-cuda")
     parser.add_argument("--gguf-dir", type=Path, default=REPO_ROOT / "artifacts" / "gguf")
     parser.add_argument("--test", type=Path, default=REPO_ROOT / "data" / "dataset" / "test.jsonl")
     parser.add_argument("--threads", type=int, default=8)
@@ -111,16 +116,26 @@ def main(argv: list[str] | None = None) -> int:
             print(f"cuantizando {name}...", flush=True)
             _run([str(quantize), str(f16), str(path), name])
 
-    print(f"\n===== LATENCIA llama.cpp (CPU, {args.threads} hilos) =====", flush=True)
-    print(f"  (decisión = {PROMPT_TOKENS} tokens de prompt + {GEN_TOKENS} de salida)")
+    llama_bench_cuda = args.llama_bin_cuda / "llama-bench.exe"
+    print(
+        f"\n===== LATENCIA llama.cpp (decisión = {PROMPT_TOKENS} prompt + {GEN_TOKENS} salida) ====="
+    )
+    print(f"  {'cuant':<8}{'tamaño':>9}{'CPU 8h':>12}{'GPU':>10}   presupuesto")
     for name, path in quants.items():
         if not path.exists():
             print(f"  {name}: no generado")
             continue
-        latency = _bench_one(llama_bench, path, args.threads)
+        cpu = _bench_one(llama_bench, path, args.threads)
+        gpu = (
+            _bench_one(llama_bench_cuda, path, args.threads, ngl=99)
+            if llama_bench_cuda.exists()
+            else -1.0
+        )
         size_mb = path.stat().st_size / (1024**2)
-        budget = "OK <1s" if 0 < latency < 1000 else "EXCEDE"
-        print(f"  {name:<8} {size_mb:6.0f} MB   latencia/decisión ≈ {latency:.0f} ms  [{budget}]")
+        cpu_ok = "CPU<1s ✓" if 0 < cpu < 1000 else "CPU ✗"
+        gpu_ok = "GPU<50ms ✓" if 0 < gpu < 50 else ("GPU " + ("n/a" if gpu < 0 else "✗"))
+        gpu_s = f"{gpu:.0f} ms" if gpu > 0 else "n/a"
+        print(f"  {name:<8}{size_mb:6.0f} MB{cpu:>8.0f} ms{gpu_s:>10}   {cpu_ok} {gpu_ok}")
     return 0
 
 
