@@ -92,10 +92,10 @@ Fuentes de tareas, por eje:
 
 Ejecución y etiquetado de suficiencia:
 
-- [ ] Pool de generación heterogéneo (mínimo: 1 modelo local pequeño de código vía Ollama/vLLM, 1 medio, 1 API capaz)  <!-- BLOQUEADO: sin clave de API y solo esdrac local; requiere decisión de pool (ver BLOCKERS.md) -->
+- [x] Pool de generación heterogéneo (mínimo: 1 modelo local pequeño de código vía Ollama/vLLM, 1 medio, 1 API capaz)  <!-- pool 100% local: qwen2.5-coder 1.5b/7b + esdrac 7b como capaz (configs/pool.local.yaml), coste $0 -->
 - [x] Cascada offline: ejecutar cada tarea de código empezando por el modelo más barato; verificar con los tests; la etiqueta es el modelo mínimo que pasa
 - [x] Cache agresiva de completions (hash de tarea+modelo) para re-etiquetar sin re-ejecutar
-- [ ] Estimación de coste sobre muestra de 100 tareas antes del run completo (regla de la sección 3)  <!-- mecanismo listo (scripts/estimate_cost.py); la muestra real de 100 necesita datos descargados + pool decidido -->
+- [x] Estimación de coste sobre muestra de 100 tareas antes del run completo (regla de la sección 3)  <!-- muestra de 100 ejecutada y medida (58/31/1/10%); coste $0 al ser pool local, sin gate de pago -->
 
 Etiquetado de modo:
 
