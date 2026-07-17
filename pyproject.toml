@@ -21,6 +21,11 @@ train = [
     "peft>=0.11",
     "datasets>=2.20",
 ]
+# Ingesta de fuentes para el etiquetado offline (Fase 2, run post-gate).
+label = [
+    "datasets>=2.20",
+    "evalplus>=0.3",
+]
 
 [project.scripts]
 check-env = "routerpolicy.scripts_entry:check_env_main"
@@ -56,10 +61,10 @@ mypy_path = "src"
 namespace_packages = true
 explicit_package_bases = true
 
-# torch solo está presente con el extra `train` (Fase 4+); en dev/CI no se
-# instala, así que no exigimos sus stubs.
+# torch (extra `train`) y datasets/evalplus (extra `label`) no se instalan en
+# dev/CI; se importan de forma perezosa, así que no exigimos sus stubs.
 [[tool.mypy.overrides]]
-module = ["torch.*"]
+module = ["torch.*", "datasets.*", "evalplus.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
