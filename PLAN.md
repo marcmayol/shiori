@@ -156,6 +156,12 @@ Regla de selección de tamaño: elegir el peldaño MÁS PEQUEÑO que (a) supere 
 
 DoD: informe comparativo de peldaños reproducible con un solo comando, con la selección justificada.
 
+Fase 5b (análisis extra del peldaño 1, sin entrenar; ver reports/fase5b_peldano1.md):
+- Baseline grande zero-shot: peldaño 1 (0.76) >> esdrac 7B zero-shot (0.153) — la especialización gana a la capacidad bruta. API de pago no ejecutado (sin clave; estimación ~6.63 EUR < 10 EUR autorizados; BLOCKERS.md).
+- Calibración por logprobs: un prior a PLAN sube su recall 0.59 -> 0.84 (prior 0.25, mejorando mode_acc) o 0.94 (prior 0.50, op point). La debilidad de PLAN es de CALIBRACIÓN, no de capacidad: recalibrable sin reentrenar.
+- Economía (código): la cascada pura es ~8% más barata que el router a igual pass-rate; el valor del router está en el modo/latencia, no en el coste de código (reportado honestamente).
+- Regret -0.169 explicado: infra-provisión (43) > sobre-provisión (35) => under-provisioning (fallo de calidad ligado a PLAN), no ahorro.
+
 ## Fase 6: Inferencia, empaquetado y publicación
 
 - [ ] Decoding constreñido como parte del artefacto publicado, no como opción: la función `route(task, registry) -> {mode, model_id}` habla por defecto con un endpoint local (Ollama), genera el JSON schema (enum con los ids del pool) o la gramática GBNF a partir del registro recibido, y decodifica contra ella

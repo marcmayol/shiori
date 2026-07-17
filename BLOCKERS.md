@@ -1,5 +1,19 @@
 # BLOCKERS
 
+## Fase 5b — baseline de API zero-shot (presupuesto 10 EUR autorizado)
+
+En Fase 5b se autorizó un presupuesto de **10 EUR** para el baseline de API
+zero-shot. La estimación (100 tareas → test completo) queda **por debajo del
+presupuesto** (~$7.21 / ~6.63 EUR), así que el gasto estaría permitido. Pero
+**sigue sin haber clave de API** configurada, así que la llamada de pago **no se
+ejecuta**.
+
+Sustituto no-pago usado: **esdrac (7B) local vía Ollama** como "modelo grande
+zero-shot como router" (26× el tamaño del peldaño 1). Resultado: el peldaño 1
+ENTRENADO (0.76 exact) supera de largo al modelo grande SIN entrenar (~0.1), que
+es la conclusión relevante. Para ejecutar el API real: configurar la clave del
+proveedor y re-lanzar `scripts/phase5b_report.py` (el adaptador ya existe).
+
 ## Fase 5 — baseline de API zero-shot NO ejecutado
 
 El goal permitía una única llamada a APIs de pago (el baseline de API zero-shot
