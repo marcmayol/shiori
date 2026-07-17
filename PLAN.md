@@ -164,12 +164,14 @@ Fase 5b (análisis extra del peldaño 1, sin entrenar; ver reports/fase5b_peldan
 
 ## Fase 6: Inferencia, empaquetado y publicación
 
-- [ ] Decoding constreñido como parte del artefacto publicado, no como opción: la función `route(task, registry) -> {mode, model_id}` habla por defecto con un endpoint local (Ollama), genera el JSON schema (enum con los ids del pool) o la gramática GBNF a partir del registro recibido, y decodifica contra ella
-- [ ] Test de integración real contra Ollama: registro de ejemplo → decisión válida, sin ninguna llamada de red externa
-- [ ] Fallback documentado para el caso residual (empate o gramática vacía): caer al modelo más capaz del pool
-- [ ] Benchmark con el runtime local real (llama.cpp/Ollama, no transformers): CPU 8 hilos y la 5070 Ti, registros de 0.5k-1k tokens, cuantizaciones Q8_0 y Q4_K_M; tabla de latencias por peldaño en la model card
-- [ ] Export: pesos en HF Hub + GGUF en Q8_0 y Q4_K_M para Ollama/llama.cpp/LM Studio
-- [ ] Model card honesta: datos usados, licencias, métricas por peldaño, límites conocidos (dominios no cubiertos, dependencia del formato de registro fijo)
+- [x] Decoding constreñido como parte del artefacto publicado, no como opción: la función `route(task, registry) -> {mode, model_id}` habla por defecto con un endpoint local (Ollama), genera el JSON schema (enum con los ids del pool) o la gramática GBNF a partir del registro recibido, y decodifica contra ella  <!-- inference/route.py + build_json_schema/build_gbnf; prior de modo 0.50 público -->
+- [x] Test de integración real contra Ollama: registro de ejemplo → decisión válida, sin ninguna llamada de red externa  <!-- tests/test_route.py::test_route_integration_real_ollama (no se salta) -->
+- [x] Fallback documentado para el caso residual (empate o gramática vacía): caer al modelo más capaz del pool  <!-- most_capable_id, documentado en el docstring de route() -->
+- [x] Benchmark con el runtime local real (llama.cpp/Ollama, no transformers): CPU 8 hilos y la 5070 Ti, registros de 0.5k-1k tokens, cuantizaciones Q8_0 y Q4_K_M; tabla de latencias por peldaño en la model card  <!-- Q8_0 512ms/35ms, Q4_K_M 526ms/35ms (CPU/GPU) -->
+- [x] Export: pesos en HF Hub + GGUF en Q8_0 y Q4_K_M para Ollama/llama.cpp/LM Studio  <!-- natzx94/shiori-router-270m (Apache-2.0): pesos + GGUF Q8_0/Q4_K_M + Modelfile -->
+- [x] Model card honesta: datos usados, licencias, métricas por peldaño, límites conocidos (dominios no cubiertos, dependencia del formato de registro fijo)  <!-- reports/model_card.md: con/sin calibración, curva del prior, economía (8% cascada), baselines incl gpt-4o, límites -->
+
+Fase 6 completa para el peldaño 1: artefacto route() vía Ollama con prior 0.50 + fallback, GBNF, latencias CPU/GPU, publicado en HF (natzx94/shiori-router-270m). Baseline API gpt-4o zero-shot: exact 0.228, PLAN 0.00 (el 270M entrenado lo supera). Ver reports/model_card.md.
 
 DoD: `ollama run` del GGUF responde decisiones válidas sobre un registro de ejemplo; pesos publicados.
 
