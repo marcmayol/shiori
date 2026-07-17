@@ -115,13 +115,22 @@ def _build_dataset(rows: list[dict[str, Any]], tokenizer: Any, max_len: int) -> 
 
 
 def _last_checkpoint(output_dir: Path) -> str | None:
+    """Último checkpoint COMPLETO (con trainer_state.json).
+
+    Un checkpoint interrumpido a mitad de escritura queda sin trainer_state.json;
+    se salta y se reanuda desde el anterior completo (robustez ante cortes).
+    """
     if not output_dir.exists():
         return None
     ckpts = sorted(
         (p for p in output_dir.glob("checkpoint-*") if p.is_dir()),
         key=lambda p: int(p.name.split("-")[1]),
+        reverse=True,
     )
-    return str(ckpts[-1]) if ckpts else None
+    for ckpt in ckpts:
+        if (ckpt / "trainer_state.json").exists():
+            return str(ckpt)
+    return None
 
 
 def _eos_ids(tokenizer: Any) -> list[int]:
@@ -176,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-steps", type=int, default=-1, help="tope de pasos (para demo/resume)"
     )
+    parser.add_argument("--save-steps", type=int, default=None, help="override de save_steps")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
 
@@ -210,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         weight_decay=cfg.weight_decay,
         lr_scheduler_type=cfg.lr_scheduler_type,
         logging_steps=cfg.logging_steps,
-        save_steps=cfg.save_steps,
+        save_steps=args.save_steps or cfg.save_steps,
         save_total_limit=cfg.save_total_limit,
         seed=cfg.seed,
         bf16=cfg.bf16,
