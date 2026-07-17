@@ -50,6 +50,20 @@ def test_ollama_estimates_tokens_when_missing() -> None:
     assert c.completion_tokens > 0
 
 
+def test_ollama_passes_options() -> None:
+    post = _FakePost({"response": "x"})
+    OllamaRunner("m", post=post, options={"num_predict": 32, "temperature": 0.0}).complete("p")
+    assert post.payload is not None
+    assert post.payload["options"] == {"num_predict": 32, "temperature": 0.0}
+
+
+def test_ollama_omits_options_when_none() -> None:
+    post = _FakePost({"response": "x"})
+    OllamaRunner("m", post=post).complete("p")
+    assert post.payload is not None
+    assert "options" not in post.payload
+
+
 def test_openai_compat_runner_parses_and_auths() -> None:
     post = _FakePost(
         {

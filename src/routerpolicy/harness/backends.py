@@ -48,20 +48,27 @@ class OllamaRunner:
         host: str = "http://localhost:11434",
         timeout: float = 300.0,
         post: PostJson = urllib_post_json,
+        options: dict[str, Any] | None = None,
     ) -> None:
         self._model = model
         self._host = host.rstrip("/")
         self._timeout = timeout
         self._post = post
+        # Opciones de Ollama (p. ej. num_predict para acotar la salida del juez,
+        # temperature para determinismo).
+        self._options = options
 
     @property
     def model_id(self) -> str:
         return self._model
 
     def complete(self, prompt: str) -> Completion:
+        payload: dict[str, Any] = {"model": self._model, "prompt": prompt, "stream": False}
+        if self._options:
+            payload["options"] = self._options
         resp = self._post(
             f"{self._host}/api/generate",
-            {"model": self._model, "prompt": prompt, "stream": False},
+            payload,
             {},
             self._timeout,
         )

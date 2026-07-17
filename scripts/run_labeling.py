@@ -22,6 +22,7 @@ from routerpolicy.dataset.sources import (
     ingest_mbpp_plus,
 )
 from routerpolicy.dataset.tasks_io import load_jsonl
+from routerpolicy.harness.backends import OllamaRunner
 from routerpolicy.harness.pool_io import load_pool
 from routerpolicy.harness.tasks import ChatTask, CodeTask, ToolTask
 from routerpolicy.labeling.judge import LlmModeJudge
@@ -100,7 +101,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.skip_mode:
         mode_tasks = _ingest_mode(args.sample)
-        judge = LlmModeJudge(pool[-1])  # el tier más capaz actúa de juez
+        # Juez dedicado: mismo modelo capaz pero salida acotada (solo el JSON) y
+        # temperatura 0 -> mucho más rápido y determinista que generar libre.
+        judge_runner = OllamaRunner(
+            pool[-1].model_id,
+            options={"num_predict": 32, "temperature": 0.0},
+        )
+        judge = LlmModeJudge(judge_runner)
         print(f"Etiquetando modo de {len(mode_tasks)} tareas...", flush=True)
         t0 = time.time()
         n = run_mode_labeling(mode_tasks, judge, mode_out)
