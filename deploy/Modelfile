@@ -1,0 +1,10 @@
+# Modelfile para Ollama — usar con el GGUF Q4_K_M de Shiori.
+#   ollama create shiori-router -f deploy/Modelfile
+FROM ./shiori-270m-Q4_K_M.gguf
+TEMPLATE """{{ if .Prompt }}<start_of_turn>user
+{{ .Prompt }}<end_of_turn>
+{{ end }}<start_of_turn>model
+{{ .Response }}<end_of_turn>
+"""
+PARAMETER stop "<end_of_turn>"
+PARAMETER temperature 0
