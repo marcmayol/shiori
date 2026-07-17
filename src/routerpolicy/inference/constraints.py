@@ -30,6 +30,28 @@ def build_decision_regex(registry: Registry) -> re.Pattern[str]:
     return re.compile(pattern)
 
 
+def _gbnf_literal(value: str) -> str:
+    """Escapa un string como literal GBNF entre comillas dobles."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def build_gbnf(registry: Registry) -> str:
+    """Gramática GBNF (llama.cpp) que solo admite la decisión canónica válida.
+
+    Genera exactamente `{"mode": "<enum>", "model_id": "<id del pool>"}`, con los
+    mismos espacios que `to_canonical_json`. Alternativa a build_json_schema para
+    el runtime de llama.cpp puro.
+    """
+    modes = " | ".join(_gbnf_literal(m.value) for m in Mode)
+    ids = " | ".join(_gbnf_literal(mid) for mid in registry.model_ids)
+    return (
+        'root ::= "{\\"mode\\": \\"" mode "\\", \\"model_id\\": \\"" modelid "\\"}"\n'
+        f"mode ::= {modes}\n"
+        f"modelid ::= {ids}\n"
+    )
+
+
 def build_json_schema(registry: Registry) -> dict[str, object]:
     """JSON schema dinámico (Ollama structured outputs) para este registro."""
     return {

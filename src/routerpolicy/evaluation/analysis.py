@@ -8,27 +8,18 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 
+from routerpolicy.registry.synthetic import capability_from_tags
 from routerpolicy.schema.core import Mode, ModelSpec, RoutingDecision
 
+__all__ = [
+    "INVALID",
+    "capability_from_tags",
+    "format_confusion",
+    "is_sufficient",
+    "mode_confusion",
+]
+
 INVALID = "INVALID"
-
-
-def capability_from_tags(tags: Sequence[str]) -> int:
-    """Recupera la capacidad oculta (0..4) desde los tags del render.
-
-    Inverso del encoding de registry/synthetic: expert->4, planning->3,
-    reasoning->2, code->1, resto->0.
-    """
-    t = set(tags)
-    if "expert" in t:
-        return 4
-    if "planning" in t:
-        return 3
-    if "reasoning" in t:
-        return 2
-    if "code" in t:
-        return 1
-    return 0
 
 
 def mode_confusion(

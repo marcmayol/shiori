@@ -141,6 +141,23 @@ def generate_pool(
     return models
 
 
+def capability_from_tags(tags: tuple[str, ...]) -> int:
+    """Recupera la capacidad oculta (0..4) desde los tags observables del render.
+
+    Inverso de _skill_tags: expert->4, planning->3, reasoning->2, code->1, resto->0.
+    """
+    t = set(tags)
+    if "expert" in t:
+        return 4
+    if "planning" in t:
+        return 3
+    if "reasoning" in t:
+        return 2
+    if "code" in t:
+        return 1
+    return 0
+
+
 def pool_signature(pool: list[SyntheticModel]) -> tuple[int, tuple[int, ...], tuple[int, ...]]:
     """Firma ESTRUCTURAL del pool (ignora nombres/costes aleatorios).
 
