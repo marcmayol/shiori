@@ -20,8 +20,10 @@ class TaskSource(StrEnum):
     BIGCODEBENCH = "bigcodebench"
     XLAM = "xlam_function_calling"
     BFCL = "bfcl"
+    HERMES = "hermes_function_calling"  # no-gated (sustituto de xLAM)
     WILDCHAT = "wildchat"
     LMSYS = "lmsys_chat_1m"
+    DOLLY = "dolly_15k"  # no-gated (sustituto de WildChat/LMSYS)
 
 
 class CodeTask(BaseModel):

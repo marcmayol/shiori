@@ -16,10 +16,10 @@ import time
 from pathlib import Path
 
 from routerpolicy.dataset.sources import (
+    ingest_dolly,
+    ingest_hermes,
     ingest_humaneval_plus,
     ingest_mbpp_plus,
-    ingest_wildchat,
-    ingest_xlam,
 )
 from routerpolicy.dataset.tasks_io import load_jsonl
 from routerpolicy.harness.pool_io import load_pool
@@ -48,10 +48,10 @@ def _ingest_code(sample: int | None) -> list[CodeTask]:
 
 
 def _ingest_mode(sample: int | None) -> list[ToolTask | ChatTask]:
-    print("Ingesta de modo (xLAM, WildChat)...", flush=True)
+    print("Ingesta de modo (Hermes, Dolly)...", flush=True)
     half = None if sample is None else max(1, sample // 2)
-    tool: list[ToolTask] = ingest_xlam(limit=half)
-    chat: list[ChatTask] = ingest_wildchat(limit=half)
+    tool: list[ToolTask] = ingest_hermes(limit=half)
+    chat: list[ChatTask] = ingest_dolly(limit=half)
     out: list[ToolTask | ChatTask] = [*tool, *chat]
     return out
 

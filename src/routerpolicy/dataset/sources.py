@@ -11,6 +11,7 @@ mapeadores puros SÍ están testeados y son el punto de verdad del formato.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -61,6 +62,44 @@ def tool_task_from_xlam(rec: dict[str, Any]) -> ToolTask:
         prompt=str(rec["query"]),
         tool_names=names,
     )
+
+
+def tool_task_from_hermes(rec: dict[str, Any]) -> ToolTask | None:
+    """Hermes function-calling (no-gated): {id, tools(JSON), conversations}.
+
+    tool_names salen de `tools`; el prompt es el primer turno 'human'. Devuelve
+    None si no hay turno humano o herramientas.
+    """
+    tools_raw = rec.get("tools")
+    tools = json.loads(tools_raw) if isinstance(tools_raw, str) else (tools_raw or [])
+    names = tuple(str(t["function"]["name"]) for t in tools if "function" in t)
+    if not names:
+        return None
+    human = next(
+        (t.get("value") for t in rec.get("conversations", []) if t.get("from") == "human"),
+        None,
+    )
+    if not human:
+        return None
+    return ToolTask(
+        task_id=f"hermes/{rec['id']}",
+        source=TaskSource.HERMES,
+        prompt=str(human),
+        tool_names=names,
+    )
+
+
+def chat_task_from_dolly(rec: dict[str, Any]) -> ChatTask | None:
+    """Dolly-15k (no-gated): {instruction, context, response, category}.
+
+    Usa `instruction` como prompt. Devuelve None si está vacía. El id se deriva
+    del hash de la instrucción (dolly no trae id).
+    """
+    instruction = str(rec.get("instruction", "")).strip()
+    if not instruction:
+        return None
+    task_id = "dolly/" + hashlib.sha1(instruction.encode("utf-8")).hexdigest()[:12]
+    return ChatTask(task_id=task_id, source=TaskSource.DOLLY, prompt=instruction)
 
 
 def chat_task_from_wildchat(rec: dict[str, Any]) -> ChatTask | None:
@@ -128,6 +167,38 @@ def ingest_wildchat(limit: int | None = None) -> list[ChatTask]:
     tasks: list[ChatTask] = []
     for rec in ds:
         task = chat_task_from_wildchat(dict(rec))
+        if task is None:
+            continue
+        tasks.append(task)
+        if limit is not None and len(tasks) >= limit:
+            break
+    return tasks
+
+
+def ingest_hermes(limit: int | None = None) -> list[ToolTask]:
+    """Carga Hermes function-calling (no-gated) vía datasets streaming."""
+    from datasets import load_dataset
+
+    ds = load_dataset("NousResearch/hermes-function-calling-v1", split="train", streaming=True)
+    tasks: list[ToolTask] = []
+    for rec in ds:
+        task = tool_task_from_hermes(dict(rec))
+        if task is None:
+            continue
+        tasks.append(task)
+        if limit is not None and len(tasks) >= limit:
+            break
+    return tasks
+
+
+def ingest_dolly(limit: int | None = None) -> list[ChatTask]:
+    """Carga Dolly-15k (no-gated) vía datasets streaming."""
+    from datasets import load_dataset
+
+    ds = load_dataset("databricks/databricks-dolly-15k", split="train", streaming=True)
+    tasks: list[ChatTask] = []
+    for rec in ds:
+        task = chat_task_from_dolly(dict(rec))
         if task is None:
             continue
         tasks.append(task)

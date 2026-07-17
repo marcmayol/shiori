@@ -8,9 +8,11 @@ suficiencia.
 from __future__ import annotations
 
 from routerpolicy.dataset.sources import (
+    chat_task_from_dolly,
     chat_task_from_wildchat,
     code_task_from_humaneval,
     code_task_from_mbpp,
+    tool_task_from_hermes,
     tool_task_from_xlam,
 )
 from routerpolicy.harness.tasks import TaskSource
@@ -84,6 +86,56 @@ def test_wildchat_filters_and_maps() -> None:
     task = chat_task_from_wildchat(rec)
     assert task is not None
     assert task.prompt == "Explain gradient descent."
+
+
+HERMES_REC = {
+    "id": "abc-123",
+    "tools": '[{"type": "function", "function": {"name": "get_weather"}}, '
+    '{"type": "function", "function": {"name": "list_cameras"}}]',
+    "conversations": [
+        {"from": "system", "value": "You are a function calling AI."},
+        {"from": "human", "value": "What's the weather in Tokyo?"},
+        {"from": "gpt", "value": "..."},
+    ],
+}
+
+
+def test_hermes_mapper_extracts_names_and_query() -> None:
+    task = tool_task_from_hermes(HERMES_REC)
+    assert task is not None
+    assert task.source is TaskSource.HERMES
+    assert task.tool_names == ("get_weather", "list_cameras")
+    assert task.prompt == "What's the weather in Tokyo?"
+    assert task.task_id == "hermes/abc-123"
+
+
+def test_hermes_accepts_list_tools() -> None:
+    rec = {**HERMES_REC, "tools": [{"type": "function", "function": {"name": "f"}}]}
+    task = tool_task_from_hermes(rec)
+    assert task is not None
+    assert task.tool_names == ("f",)
+
+
+def test_hermes_none_without_tools_or_human() -> None:
+    assert tool_task_from_hermes({**HERMES_REC, "tools": "[]"}) is None
+    no_human = {**HERMES_REC, "conversations": [{"from": "system", "value": "x"}]}
+    assert tool_task_from_hermes(no_human) is None
+
+
+def test_dolly_mapper_uses_instruction() -> None:
+    task = chat_task_from_dolly({"instruction": "Explain photosynthesis.", "category": "open_qa"})
+    assert task is not None
+    assert task.source is TaskSource.DOLLY
+    assert task.prompt == "Explain photosynthesis."
+    assert task.task_id.startswith("dolly/")
+
+
+def test_dolly_stable_id_and_empty_rejected() -> None:
+    a = chat_task_from_dolly({"instruction": "same"})
+    b = chat_task_from_dolly({"instruction": "same"})
+    assert a is not None and b is not None
+    assert a.task_id == b.task_id  # id estable (hash)
+    assert chat_task_from_dolly({"instruction": "   "}) is None
 
 
 def test_wildchat_rejects_toxic_and_non_english() -> None:
