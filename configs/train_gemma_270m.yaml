@@ -1,0 +1,18 @@
+# Peldaño 1 de la escalera (Fase 4): Gemma 3 270M, full fine-tune.
+# Base pequeña -> batch grande y varias epochs caben holgados en 16 GB (bf16).
+step_name: gemma-3-270m
+model_id: google/gemma-3-270m
+max_seq_len: 2048
+learning_rate: 2.0e-5
+per_device_train_batch_size: 16
+gradient_accumulation_steps: 1
+num_train_epochs: 3.0
+warmup_ratio: 0.03
+weight_decay: 0.0
+lr_scheduler_type: cosine
+logging_steps: 20
+save_steps: 200
+save_total_limit: 2
+seed: 20260717
+bf16: true
+gradient_checkpointing: false
