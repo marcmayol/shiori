@@ -1,0 +1,15 @@
+# Pool de generación de etiquetas — 100% local y gratis.
+#
+# Tiers ordenados de más barato a más capaz. La cascada arranca por el primero y
+# escala solo si falla la verificación. NO es el registro que ve el router (eso
+# se renderiza y se augmenta aparte): esto son los modelos REALES que se ejecutan
+# offline para obtener la verdad de referencia de suficiencia.
+cache_dir: data/completions_cache
+host: http://localhost:11434
+tiers:
+  - id: qwen2.5-coder:1.5b
+    backend: ollama
+  - id: qwen2.5-coder:7b
+    backend: ollama
+  - id: esdrac:latest
+    backend: ollama
