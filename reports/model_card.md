@@ -15,55 +15,53 @@ language:
   - es
 ---
 
-# Shiori 栞 — On-device model router (270M)
+# Shiori 270M — model-routing policy
 
-**Shiori** is a tiny (270M) policy that decides **which model to use for a task**.
-Given a list of available models (rendered in the prompt) and a task, it outputs a
-single JSON object:
+A 270M-parameter model that maps a task and a set of available models (a
+*registry*) to a routing decision. Full fine-tune of `google/gemma-3-270m`.
+Input and output are a fixed contract; the output is a single JSON object:
 
 ```json
-{"mode": "DIRECT | TOOL_CALL | PLAN", "model_id": "<the cheapest sufficient model in the list>"}
+{"mode": "DIRECT|TOOL_CALL|PLAN", "model_id": "<one id from the registry>"}
 ```
 
-It runs **100% locally** (llama.cpp / Ollama / LM Studio), with **constrained
-decoding** so the output is always a valid choice from the models you provide. It
-is a full fine-tune of [`google/gemma-3-270m`](https://huggingface.co/google/gemma-3-270m).
+- `mode` — execution mode: `DIRECT` (single completion), `TOOL_CALL` (tool loop),
+  `PLAN` (multi-step planning).
+- `model_id` — the minimal-cost model in the registry whose capability is
+  sufficient for the task.
 
-- **Modes**: `DIRECT` (answerable in one shot), `TOOL_CALL` (needs tools), `PLAN`
-  (needs multi-step planning → route to a capable model).
-- **model_id**: the *minimal sufficient* model in the pool — it reads each model's
-  tags, cost and context window to pick the cheapest one that can do the job.
-- **Portable**: trained with randomized model names/costs, so it generalizes to
-  pools of models it has never seen.
-
-Code, training pipeline and reports: **https://github.com/marcmayol/shiori**
+Inference is designed for local runtimes (llama.cpp, Ollama, LM Studio) with
+constrained decoding restricting the output to valid modes and to the ids present
+in the registry. Source and training pipeline:
+https://github.com/marcmayol/shiori
 
 ---
 
-## 🇬🇧 English
+## Model details
 
-### Intended use
+- Architecture: Gemma 3 (decoder-only), 268.1M parameters, vocab 262k.
+- Method: full fine-tune, bf16.
+- Objective: cross-entropy on the assistant tokens only (prompt masked).
+- Hyperparameters: 3 epochs, lr 2e-5 (cosine, warmup 0.03), effective batch 16,
+  max sequence length 768.
+- Chat format (the model has no default template; this one is used for train and
+  inference, with `system` merged into the user turn):
 
-A **local, zero-network router** in front of a set of LLMs. It *predicts* the best
-model and mode; it does not run or verify anything — your surrounding code does the
-execution (try → verify → escalate). Useful when you have a mix of cheap local
-models and expensive capable ones and want to send each task to the smallest model
-that suffices.
+  ```
+  <start_of_turn>user
+  {SYSTEM}
 
-**Out of scope**: it only works with the fixed registry format below; it is not a
-chat model and does not solve the tasks itself.
+  {registry}
 
-### How to use
+  Task:
+  {task}<end_of_turn>
+  <start_of_turn>model
+  {"mode": "...", "model_id": "..."}<end_of_turn>
+  ```
 
-**Ollama** (recommended):
+## Registry format (fixed contract)
 
-```bash
-# download shiori-270m-Q4_K_M.gguf and Modelfile from this repo, then:
-ollama create shiori-router -f Modelfile
-```
-
-Send a prompt built as `SYSTEM + registry + task` and use structured output (JSON
-schema) so the answer is always valid. The registry format is fixed:
+One line per model. The model reads tags, cost, context window and tool support.
 
 ```
 Available models:
@@ -72,179 +70,188 @@ Available models:
 - big-api    | tags:code,reasoning,planning | ctx:200000 | cost:20 | loc:api | tools:yes
 
 Task:
-Design and implement a distributed rate limiter with tests and a rollout plan.
+<the task>
 ```
 
-→ `{"mode": "PLAN", "model_id": "big-api"}`
+Capability is encoded in the tags: `reasoning` ⟺ capability ≥ 2, `planning` ⟺ ≥ 3,
+`expert` ⟺ 4. Registries are not part of the model weights; they are supplied at
+inference time.
 
-**Transformers**:
+## Usage
+
+Ollama:
+
+```bash
+# from this repo: shiori-270m-Q4_K_M.gguf + Modelfile
+ollama create shiori-router -f Modelfile
+```
+
+Call `/api/generate` with `prompt = SYSTEM + registry + task` and a JSON-schema
+`format` built from the registry (enum of modes, enum of ids) so the output is
+always valid.
+
+Transformers:
 
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
 tok = AutoTokenizer.from_pretrained("natzx94/shiori-router-270m")
 model = AutoModelForCausalLM.from_pretrained("natzx94/shiori-router-270m")
-# build "<start_of_turn>user\n{SYSTEM}\n\n{registry}\n\nTask:\n{task}<end_of_turn>\n<start_of_turn>model\n"
-# generate, stop at <end_of_turn>, parse the JSON.
+# build the chat format above, generate, stop at <end_of_turn>, parse the JSON.
 ```
 
-A reference `route(task, registry)` helper (talks to Ollama, builds the JSON
-schema, applies the calibration prior, falls back to the most capable model on any
-failure) lives in the GitHub repo.
+The GitHub repo provides `route(task, registry, plan_prior=0.5)` which talks to a
+local Ollama endpoint, generates the JSON schema / GBNF grammar from the registry,
+applies the calibration prior, and falls back to the most capable model in the pool
+on invalid output.
 
-### Evaluation
+## Training data
 
-On a **frozen test set of never-seen model pools** (n = 400), constrained decoding:
+- Sufficiency labels (code axis): HumanEval+ and MBPP+ (evalplus). The label is the
+  lowest-cost model that passes the task's tests, obtained by executing a pool of
+  models and verifying their output.
+- Mode labels: Hermes function-calling v1 (Apache-2.0) for `TOOL_CALL`; Dolly-15k
+  (CC-BY-SA-3.0) for `DIRECT`/`PLAN`, via rules plus an LLM judge.
 
-| | exact | mode acc | model_id acc | DIRECT | TOOL_CALL | PLAN |
-|---|------:|---------:|-------------:|-------:|----------:|-----:|
-| default | 0.760 | 0.853 | 0.802 | 0.94 | 0.79 | 0.59 |
-| with `plan_prior=0.25` | ~0.77 | **0.865** | — | 0.91 | 0.80 | 0.84 |
-| with `plan_prior=0.50` | ~0.76 | 0.838 | — | 0.84 | 0.79 | **0.94** |
+Task registries are synthetic: model names, tags, costs and pool sizes (2–8) are
+randomized per example, and the label is recomputed for each pool. The final
+dataset is ~50k rows; the test split contains only pool compositions absent from
+training. Datasets are not redistributed. Model weights: Apache-2.0.
 
-- **Invalid outputs**: 0.000 with constrained decoding (0.013 without).
-- **Calibration knob** — `plan_prior` biases the mode decision toward `PLAN` at
-  inference time. `PLAN` accuracy is largely a *calibration* issue, not a capacity
-  one: a small prior recovers it **without retraining** (`0.25` is nearly free and
-  even improves overall accuracy; `0.50` maximizes `PLAN` recall).
+## Evaluation
 
-**Versus zero-shot baselines (same test set):**
+Protocol: held-out test set, n = 400 (fixed seed), model pools with structural
+compositions not present in training. Constrained decoding via per-candidate
+log-probability scoring. "Sufficiency" is defined as chosen-model capability ≥ task
+difficulty, where difficulty is the rank of the minimal sufficient model from the
+label cascade.
 
-| router | exact | mode acc | PLAN acc |
+Metrics at the default prior (constrained):
+
+| metric | value |
+|--------|------:|
+| exact match ({mode, model_id}) | 0.760 |
+| mode accuracy | 0.853 |
+| model_id accuracy | 0.802 |
+| invalid-output rate (constrained / free) | 0.000 / 0.013 |
+| per-class mode accuracy (DIRECT / TOOL_CALL / PLAN) | 0.94 / 0.79 / 0.59 |
+
+Generalization gap: exact match 0.930 on training pool compositions vs 0.760 on
+unseen ones.
+
+`plan_prior` adds a constant to the `PLAN` log-probability before the argmax over
+modes (inference-time, no retraining). Measured sweep:
+
+| plan_prior | PLAN recall | DIRECT recall | TOOL recall | mode acc | mean cost |
+|-----------:|------------:|--------------:|------------:|---------:|----------:|
+| 0.00 | 0.592 | 0.936 | 0.795 | 0.853 | 5.73 |
+| 0.25 | 0.837 | 0.906 | 0.795 | 0.865 | 5.97 |
+| 0.50 | 0.939 | 0.842 | 0.786 | 0.838 | 6.17 |
+
+It trades `PLAN` recall against `DIRECT`/`TOOL_CALL` recall and mean cost.
+
+Baselines on the same test set (zero-shot, constrained):
+
+| system | exact | mode acc | PLAN acc |
 |--------|------:|---------:|---------:|
-| **Shiori 270M (this model)** | **0.760** | **0.853** | 0.59 / **0.94** calibrated |
+| Shiori 270M (fine-tuned) | 0.760 | 0.853 | 0.59 (0.94 at prior 0.50) |
 | GPT-4o zero-shot | 0.228 | 0.718 | 0.00 |
-| Qwen 7B zero-shot | 0.153 | 0.367 | 0.27 |
-| "always cheapest" heuristic | 0.212 | 0.585 | 0.00 |
+| Qwen2.5-7B zero-shot | 0.153 | 0.367 | 0.27 |
+| always-cheapest heuristic | 0.212 | 0.585 | 0.00 |
 
-A **trained 270M beats a frontier model zero-shot** here, because the task is about
-learning the *minimal-sufficient* semantics and the fixed format, not raw capability.
+The zero-shot models score lower on `model_id` selection and on `PLAN`; the task
+depends on the minimal-sufficient labeling and the fixed I/O contract rather than
+general capability.
 
-**Economics (honest note)**: on verifiable code tasks, a plain cheapest-first
-cascade is ~8% cheaper than routing at the same pass rate. The router's value is
-**mode selection, latency (fewer failed attempts), and domains with no mechanical
-verifier**, not cost savings on code.
+Cost regret (chosen-model cost − oracle/minimal-sufficient cost, mean) = −0.169.
+The negative value reflects under-provisioning (choosing a cheaper-than-sufficient
+model), correlated with `PLAN` errors; it is not a cost saving. A `capability_prior`
+parameter shifts the model_id choice toward more capable models and reduces
+under-provisioning at higher cost.
 
-### Latency (llama.cpp, ~320-token registry + 24-token answer)
+Economic simulation (code tasks; router = first bet + escalate to the capable model
+on failure; cost proportional to model size):
+
+| system | mean cost | pass rate |
+|--------|----------:|----------:|
+| router | 6.05 | 0.880 |
+| cheapest-first cascade | 5.61 | 0.880 |
+
+On verifiable code, the cheapest-first cascade is ~8% cheaper at equal pass rate.
+Routing is advantageous for mode selection and for domains without a mechanical
+verifier, not for cost on code.
+
+## Latency
+
+Measured with `llama-bench` (registry ≈ 320 tokens, output 24 tokens):
 
 | quant | size | CPU (8 threads) | GPU |
 |-------|-----:|----------------:|----:|
 | Q8_0 | 286 MB | 512 ms | 35 ms |
 | Q4_K_M | 249 MB | 526 ms | 35 ms |
 
-CPU-only is fully functional (< 1 s per decision).
+## Limitations
 
-### Training data
-
-- **Sufficiency (code)**: HumanEval+ / MBPP+ (evalplus) — labels come from actually
-  running models and checking their tests.
-- **Mode**: Hermes function-calling v1 (Apache-2.0) and Dolly-15k (CC-BY-SA-3.0).
-
-Datasets are not redistributed; only the learned behavior ships. Model: Apache-2.0.
-
-### Limitations
-
-- Raw `PLAN` recall is 0.59 (mitigate with `plan_prior`, see above).
-- Hard dependency on the **fixed registry format** — it will not work outside it.
-- Domains covered: code, tool-calling, general chat (English). Others are not
-  represented.
-- It **predicts, it does not verify** — real sufficiency depends on your wrapper.
-- This is the **smallest model in a size ladder** (270M); a larger step could raise
-  the `PLAN` ceiling further.
+- `PLAN` recall is 0.59 at the default prior; the `plan_prior` parameter raises it
+  (0.84 at 0.25, 0.94 at 0.50) at inference time.
+- The model requires the fixed registry format; it does not handle other formats.
+- Covered domains: code, tool-calling, general instruction-following (English).
+- The model predicts a route; it does not execute or verify. Real sufficiency
+  depends on the surrounding system.
+- 270M is the smallest step of a size ladder; a larger model may raise the `PLAN`
+  ceiling.
 
 ---
 
-## 🇪🇸 Español
+## Español
 
-### Para qué sirve
+Modelo de 270M que, dada una tarea y un conjunto de modelos disponibles (un
+*registro*), predice una decisión de routing `{"mode", "model_id"}`. Fine-tune
+completo de `google/gemma-3-270m`. Inferencia local (llama.cpp/Ollama/LM Studio)
+con decoding constreñido a los modos y a los ids del registro.
 
-Un **router local, sin red**, delante de un conjunto de LLMs. *Predice* el mejor
-modelo y modo; no ejecuta ni verifica — eso lo hace el código que lo envuelve
-(probar → verificar → escalar). Útil cuando tienes una mezcla de modelos locales
-baratos y modelos capaces caros y quieres mandar cada tarea al **modelo más pequeño
-que basta**.
+- `mode`: `DIRECT` (una completion), `TOOL_CALL` (bucle de herramientas), `PLAN`
+  (planificación multi-paso).
+- `model_id`: el modelo de menor coste del registro cuya capacidad basta.
 
-**Fuera de alcance**: solo funciona con el formato de registro fijo de abajo; no es
-un modelo de chat ni resuelve las tareas.
+**Detalles**: 268.1M parámetros, full fine-tune bf16, pérdida solo sobre la
+respuesta del assistant, 3 epochs, lr 2e-5, batch 16, seq 768.
 
-### Cómo usarlo
+**Datos**: suficiencia de HumanEval+/MBPP+ (etiqueta = modelo mínimo que pasa los
+tests, por ejecución real); modo de Hermes function-calling (Apache-2.0) y Dolly-15k
+(CC-BY-SA-3.0). Registros sintéticos con nombres/costes/tamaños aleatorizados;
+~50k filas; el test solo contiene composiciones de pool ausentes en train. Modelo
+Apache-2.0.
 
-**Ollama** (recomendado):
+**Evaluación** (test congelado, n=400, semilla fija, pools no vistos; decoding
+constreñido):
 
-```bash
-# descarga shiori-270m-Q4_K_M.gguf y Modelfile de este repo, luego:
-ollama create shiori-router -f Modelfile
-```
+Por defecto: exact 0.760, acc. modo 0.853, acc. model_id 0.802, inválidos 0.000
+(0.013 sin constraint), por clase DIRECT 0.94 / TOOL_CALL 0.79 / PLAN 0.59.
 
-El prompt es `SYSTEM + registro + tarea`, con structured output (JSON schema) para
-que la salida sea siempre válida. El formato del registro es fijo:
+Barrido de `plan_prior` (recall de PLAN / DIRECT / TOOL, acc. modo, coste):
 
-```
-Available models:
-- fast-local | tags:code,general | ctx:8192 | cost:1 | loc:local | tools:no
-- mid-local  | tags:code,reasoning | ctx:32768 | cost:3 | loc:local | tools:yes
-- big-api    | tags:code,reasoning,planning | ctx:200000 | cost:20 | loc:api | tools:yes
+| plan_prior | PLAN | DIRECT | TOOL | acc. modo | coste |
+|-----------:|-----:|-------:|-----:|----------:|------:|
+| 0.00 | 0.592 | 0.936 | 0.795 | 0.853 | 5.73 |
+| 0.25 | 0.837 | 0.906 | 0.795 | 0.865 | 5.97 |
+| 0.50 | 0.939 | 0.842 | 0.786 | 0.838 | 6.17 |
 
-Task:
-Diseña e implementa un rate limiter distribuido con tests y plan de despliegue.
-```
+`plan_prior` suma una constante al log-prob de `PLAN` antes del argmax (parámetro
+de inferencia, sin reentrenar).
 
-→ `{"mode": "PLAN", "model_id": "big-api"}`
+Baselines zero-shot (mismo test): GPT-4o 0.228 exact / PLAN 0.00; Qwen2.5-7B 0.153;
+cascada "siempre el más barato" 0.212. El coste-regret medio es −0.169 (infra-
+provisión, no ahorro). En código verificable, la cascada pura es ~8% más barata a
+igual pass-rate; el router aporta en la decisión de modo y en dominios sin
+verificador.
 
-### Evaluación
+**Latencia** (llama.cpp): Q8_0 512 ms CPU / 35 ms GPU; Q4_K_M 526 ms / 35 ms.
 
-Sobre un **test congelado con pools de modelos nunca vistos** (n = 400), con
-decoding constreñido:
-
-| | exact | acc. modo | acc. model_id | DIRECT | TOOL_CALL | PLAN |
-|---|------:|----------:|--------------:|-------:|----------:|-----:|
-| por defecto | 0.760 | 0.853 | 0.802 | 0.94 | 0.79 | 0.59 |
-| `plan_prior=0.25` | ~0.77 | **0.865** | — | 0.91 | 0.80 | 0.84 |
-| `plan_prior=0.50` | ~0.76 | 0.838 | — | 0.84 | 0.79 | **0.94** |
-
-- **Salidas inválidas**: 0.000 con constraint (0.013 sin él).
-- **Ajuste `plan_prior`**: sesga la decisión de modo hacia `PLAN` en inferencia. La
-  precisión de `PLAN` es sobre todo un problema de **calibración**, no de capacidad:
-  un prior pequeño la recupera **sin reentrenar** (`0.25` casi gratis y mejora la
-  exactitud global; `0.50` maximiza el recall de `PLAN`).
-
-**Frente a baselines zero-shot (mismo test):** un **270M entrenado supera a GPT-4o
-zero-shot** (0.760 vs 0.228, PLAN 0.94 vs 0.00) porque la tarea va de aprender la
-semántica de "mínimo suficiente" y el formato fijo, no de capacidad bruta.
-
-**Nota económica honesta**: en tareas de código verificable, una cascada pura
-(empezar por el más barato) es ~8% más barata que el router a igual pass-rate. El
-valor del router está en **decidir el modo, la latencia y los dominios sin
-verificador mecánico**, no en el ahorro de coste en código.
-
-### Latencia (llama.cpp)
-
-| cuant. | tamaño | CPU (8 hilos) | GPU |
-|--------|-------:|--------------:|----:|
-| Q8_0 | 286 MB | 512 ms | 35 ms |
-| Q4_K_M | 249 MB | 526 ms | 35 ms |
-
-CPU-only es funcional (< 1 s por decisión).
-
-### Datos de entrenamiento
-
-- **Suficiencia (código)**: HumanEval+ / MBPP+ (evalplus) — etiquetas por ejecución
-  real de modelos y verificación de sus tests.
-- **Modo**: Hermes function-calling v1 (Apache-2.0) y Dolly-15k (CC-BY-SA-3.0).
-
-No se redistribuyen los datasets; solo viaja el comportamiento aprendido. Apache-2.0.
-
-### Límites conocidos
-
-- Recall de `PLAN` crudo 0.59 (mitigable con `plan_prior`).
-- Depende del **formato de registro fijo**; fuera de él no funciona.
-- Dominios: código, tool-calling y chat general (inglés). Otros no están cubiertos.
-- **Predice, no verifica** — la suficiencia real depende de tu código.
-- Es el **modelo más pequeño de una escalera**; un peldaño mayor podría subir el
-  techo de `PLAN`.
+**Límites**: recall de `PLAN` 0.59 por defecto (subible con `plan_prior`);
+dependencia del formato de registro fijo; dominios code/tool/chat en inglés;
+predice, no verifica; es el peldaño más pequeño de una escalera.
 
 ---
-
-### Citation
 
 ```
 @software{shiori_router_2026,
