@@ -22,13 +22,23 @@ pub enum Estado {
 fn cliente() -> reqwest::Client {
     crate::instalar_tls();
     reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(5))
         .no_proxy()
         .build()
         .expect("cliente HTTP local")
 }
 
+/// Si se puede ocupar el puerto, nadie escucha en él. Es más fiable que esperar a que rechacen la
+/// conexión: en Windows, conectar a un puerto local cerrado tarda unos 2 s en fallar.
+fn puerto_libre(config: &Config) -> bool {
+    let host = config.host.trim_start_matches('[').trim_end_matches(']');
+    std::net::TcpListener::bind((host, config.port)).is_ok()
+}
+
 pub async fn estado(config: &Config) -> Estado {
+    if puerto_libre(config) {
+        return Estado::Parado;
+    }
     let url = format!("{}/_shiori/health", config.url_local());
     match cliente().get(&url).send().await {
         Ok(r) => match r.json::<serde_json::Value>().await {
