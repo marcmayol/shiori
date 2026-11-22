@@ -343,7 +343,10 @@ fn un_solo_serve_por_puerto_en_windows() {
     assert!(!estado.success());
     let mut error = String::new();
     std::io::Read::read_to_string(s.0.stderr.as_mut().unwrap(), &mut error).unwrap();
-    assert!(error.contains("another Shiori is already running"), "{error}");
+    assert!(
+        error.contains("another Shiori is already running"),
+        "{error}"
+    );
     assert!(
         !dir.path().join(format!("server-{puerto}.key")).exists(),
         "no tiene que pisar la clave de parada del otro"
