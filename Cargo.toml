@@ -39,6 +39,9 @@ toml = "1.2.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console"] }
+
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false }
 tempfile = "3.27.0"

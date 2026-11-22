@@ -152,6 +152,7 @@ pub async fn asegurar_servidor(config: &Config) -> Result<(), String> {
         .stdout(salida)
         .stderr(error);
     separar_del_terminal(&mut cmd);
+    no_heredar_stdio_propio();
     cmd.spawn()
         .map_err(|e| format!("cannot start the Shiori server: {e}"))?;
     for _ in 0..100 {
@@ -183,6 +184,34 @@ fn separar_del_terminal(cmd: &mut Command) {
 
 #[cfg(not(any(unix, windows)))]
 fn separar_del_terminal(_: &mut Command) {}
+
+/// En Windows, `CreateProcess` pasa al hijo todos los handles heredables, no solo los de su stdio.
+/// Si el servidor en segundo plano se quedara con la salida de `shiori run` (una tubería, cuando
+/// la lee un script), quien la lee esperaría para siempre. Rust duplica como heredables los handles
+/// que pasa a cada hijo, así que quitar el flag a los originales no cambia lo que ve el programa
+/// lanzado. En Unix no hace falta: Rust abre todo con `O_CLOEXEC`.
+#[cfg(windows)]
+fn no_heredar_stdio_propio() {
+    use windows_sys::Win32::Foundation::{
+        HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: GetStdHandle y SetHandleInformation solo leen y cambian flags de un handle propio;
+        // un handle nulo o inválido se salta y un fallo no tiene consecuencias.
+        unsafe {
+            let h = GetStdHandle(id);
+            if !h.is_null() && h != INVALID_HANDLE_VALUE {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn no_heredar_stdio_propio() {}
 
 /// Cómo inició sesión Codex: con la cuenta de ChatGPT (suscripción) o con una API key.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
