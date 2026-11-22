@@ -57,6 +57,61 @@ pub fn ruta_clave(config: &Config) -> PathBuf {
     carpeta_datos().join(format!("server-{}.key", config.port))
 }
 
+pub fn ruta_bloqueo(config: &Config) -> PathBuf {
+    carpeta_datos().join(format!("server-{}.lock", config.port))
+}
+
+/// En Windows, un `shiori serve` por puerto y carpeta de datos: el fichero de bloqueo se abre sin
+/// compartir y Windows lo suelta cuando el proceso termina, aunque muera de golpe. Hace falta
+/// porque en Windows llegaron a escuchar dos servidores en el mismo puerto (dos `run` seguidos):
+/// el segundo pisaba la clave de parada y `stop` dejaba vivo al otro. En Unix ya lo impide `bind`.
+#[cfg(windows)]
+pub fn bloquear_puerto(config: &Config) -> Result<Option<std::fs::File>, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    let ruta = ruta_bloqueo(config);
+    if let Some(c) = ruta.parent() {
+        std::fs::create_dir_all(c).map_err(|e| format!("cannot create {}: {e}", c.display()))?;
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(&ruta)
+    {
+        Ok(f) => Ok(Some(f)),
+        Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => Err(format!(
+            "another Shiori is already running on port {} (`shiori status`)",
+            config.port
+        )),
+        Err(e) => Err(format!("cannot open {}: {e}", ruta.display())),
+    }
+}
+
+#[cfg(not(windows))]
+pub fn bloquear_puerto(_config: &Config) -> Result<Option<std::fs::File>, String> {
+    Ok(None)
+}
+
+/// ¿Sigue vivo el `serve` de este puerto? Al cerrar el puerto aún guarda las métricas: un `run`
+/// justo detrás no podría arrancar otro hasta que suelte el bloqueo.
+#[cfg(windows)]
+fn bloqueado(config: &Config) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(ruta_bloqueo(config))
+        .is_err_and(|e| e.raw_os_error() == Some(ERROR_SHARING_VIOLATION))
+}
+
+#[cfg(not(windows))]
+fn bloqueado(_config: &Config) -> bool {
+    false
+}
+
 pub fn ruta_log() -> PathBuf {
     carpeta_datos().join("shiori.log")
 }
@@ -113,7 +168,7 @@ pub async fn parar(config: &Config) -> Result<bool, String> {
         return Err(format!("the server refused to stop ({})", r.status()));
     }
     for _ in 0..100 {
-        if matches!(estado(config).await, Estado::Parado) {
+        if matches!(estado(config).await, Estado::Parado) && !bloqueado(config) {
             return Ok(true);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

@@ -6,9 +6,12 @@
 //! - `x-fake-tokens: 50` tokens de salida (por defecto, los de las opciones).
 //! - `x-fake-delay-ms: 5` espera entre tokens en streaming.
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use tokio::time::Instant;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -25,6 +28,10 @@ use tokio::sync::oneshot;
 pub const ENTRADA: u64 = 120;
 pub const CACHE_LEIDA: u64 = 300;
 pub const CACHE_ESCRITA: u64 = 40;
+
+/// Cuántas peticiones recuerda (las últimas). Sin tope, un `shiori fake` de larga vida bajo carga
+/// se quedaba sin memoria: con cuerpos de 55 KB crecía unos 11 MB/s a 200 peticiones/s.
+pub const MAX_VISTAS: usize = 256;
 
 #[derive(Clone, Debug)]
 pub struct OpcionesFalso {
@@ -55,7 +62,7 @@ pub struct PeticionVista {
 
 struct Estado {
     opciones: OpcionesFalso,
-    vistas: Mutex<Vec<PeticionVista>>,
+    vistas: Mutex<VecDeque<PeticionVista>>,
 }
 
 pub struct ServidorFalso {
@@ -70,11 +77,13 @@ impl ServidorFalso {
     }
 
     pub fn ultima(&self) -> Option<PeticionVista> {
-        self.estado.vistas.lock().unwrap().last().cloned()
+        self.estado.vistas.lock().unwrap().back().cloned()
     }
 
+    /// Las últimas peticiones recibidas (como mucho [`MAX_VISTAS`]), de la más antigua a la última.
     pub fn vistas(&self) -> Vec<PeticionVista> {
-        self.estado.vistas.lock().unwrap().clone()
+        let vistas = self.estado.vistas.lock().unwrap();
+        vistas.iter().cloned().collect()
     }
 }
 
@@ -91,7 +100,7 @@ pub async fn arrancar(direccion: &str, opciones: OpcionesFalso) -> std::io::Resu
     let direccion = listener.local_addr()?;
     let estado = Arc::new(Estado {
         opciones,
-        vistas: Mutex::new(Vec::new()),
+        vistas: Mutex::new(VecDeque::new()),
     });
     let app = Router::new().fallback(atender).with_state(estado.clone());
     let (tx, rx) = oneshot::channel::<()>();
@@ -137,12 +146,18 @@ async fn atender(State(estado): State<Arc<Estado>>, peticion: Request) -> Respon
         .path_and_query()
         .map(|p| p.as_str().to_string())
         .unwrap_or_default();
-    estado.vistas.lock().unwrap().push(PeticionVista {
-        metodo: partes.method.to_string(),
-        ruta: ruta.clone(),
-        cabeceras: partes.headers.clone(),
-        cuerpo: cuerpo.clone(),
-    });
+    {
+        let mut vistas = estado.vistas.lock().unwrap();
+        if vistas.len() >= MAX_VISTAS {
+            vistas.pop_front();
+        }
+        vistas.push_back(PeticionVista {
+            metodo: partes.method.to_string(),
+            ruta: ruta.clone(),
+            cabeceras: partes.headers.clone(),
+            cuerpo: cuerpo.clone(),
+        });
+    }
     let camino = ruta.split('?').next().unwrap_or("");
     let json_cuerpo: Value = serde_json::from_slice(&cuerpo).unwrap_or(Value::Null);
     let h = &partes.headers;
@@ -314,10 +329,17 @@ async fn atender(State(estado): State<Arc<Estado>>, peticion: Request) -> Respon
     } else {
         "text/event-stream"
     };
+    // Plazos absolutos desde el primer trozo, no una espera tras otra: en Windows cada espera corta
+    // dura un tic del sistema (~15,6 ms), y 50 tokens a 2 ms tardaban 800 ms en vez de 100.
+    let inicio = Instant::now();
     let flujo =
         futures_util::stream::iter(trozos.into_iter().enumerate()).then(move |(i, t)| async move {
             if i > 0 && retardo > 0 {
-                tokio::time::sleep(Duration::from_millis(retardo)).await;
+                let plazo = Duration::from_millis(retardo).saturating_mul(i as u32);
+                match inicio.checked_add(plazo) {
+                    Some(p) => tokio::time::sleep_until(p).await,
+                    None => tokio::time::sleep(plazo).await,
+                }
             }
             Ok::<_, std::io::Error>(Bytes::from(t))
         });

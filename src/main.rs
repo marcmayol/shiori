@@ -65,9 +65,9 @@ enum Comando {
     },
     /// Measure what Shiori adds against calling the API directly (on the fake server, no tokens spent)
     Bench {
-        #[arg(long, default_value_t = 500)]
+        #[arg(long, default_value_t = 500, value_parser = al_menos_uno)]
         requests: usize,
-        #[arg(long, default_value_t = 16)]
+        #[arg(long, default_value_t = 16, value_parser = al_menos_uno)]
         concurrency: usize,
         #[arg(long, default_value_t = 50)]
         tokens: u32,
@@ -83,6 +83,15 @@ enum Comando {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// `--requests 0` o `--concurrency 0` no miden nada: mejor un error claro que una tabla de ceros.
+fn al_menos_uno(texto: &str) -> Result<usize, String> {
+    match texto.parse::<usize>() {
+        Ok(0) => Err("must be at least 1".into()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[derive(Args)]
@@ -228,7 +237,7 @@ async fn ejecutar(comando: Comando) -> Result<i32, String> {
             .await
             .map_err(|e| format!("cannot listen on {host}:{port}: {e}"))?;
             println!("Fake API listening at {} (Ctrl+C to stop)", s.url());
-            let _ = tokio::signal::ctrl_c().await;
+            Parada::nueva().esperar().await;
             Ok(0)
         }
         Comando::Bench {
@@ -265,6 +274,12 @@ async fn ejecutar(comando: Comando) -> Result<i32, String> {
 
 async fn servir(config: Config) -> Result<(), String> {
     let direccion = format!("{}:{}", config.host, config.port);
+    // Antes de escuchar: el segundo `serve` se va sin llegar a abrir el puerto. Se queda abierto
+    // mientras dure el servidor.
+    let bloqueo = lanzar::bloquear_puerto(&config)?;
+    let ruta_bloqueo = lanzar::ruta_bloqueo(&config);
+    // También antes de escuchar: un SIGTERM que llegue en cuanto responde no lo mata de golpe.
+    let mut parada = Parada::nueva();
     let listener = TcpListener::bind(&direccion).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::AddrInUse {
             format!("{direccion} is already in use (is Shiori already running? `shiori status`)")
@@ -283,15 +298,59 @@ async fn servir(config: Config) -> Result<(), String> {
         None => tracing::info!("metrics off"),
     }
     let apagar = s.senal_apagado();
+    let clave_forzada = ruta_clave.clone();
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            tracing::info!("stopping");
-            apagar.notify_one();
-        }
+        parada.esperar().await;
+        tracing::info!("stopping (Ctrl+C or SIGTERM again stops at once)");
+        apagar.notify_one();
+        // Un streaming largo puede tardar minutos en acabar: la segunda señal no espera.
+        parada.esperar().await;
+        tracing::warn!("stopping now");
+        let _ = std::fs::remove_file(&clave_forzada);
+        std::process::exit(1);
     });
     let r = s.esperar().await;
     let _ = std::fs::remove_file(ruta_clave);
+    if let Some(b) = bloqueo {
+        drop(b);
+        let _ = std::fs::remove_file(ruta_bloqueo);
+    }
     r.map_err(|e| e.to_string())
+}
+
+/// Ctrl+C y, en Unix, SIGTERM (`kill`, systemd, el apagado del equipo): los dos cierran en orden,
+/// dejando terminar las llamadas en curso para que queden en las métricas.
+struct Parada {
+    #[cfg(unix)]
+    term: Option<tokio::signal::unix::Signal>,
+}
+
+impl Parada {
+    /// Desde aquí SIGTERM ya no mata el proceso: lo recoge `esperar`.
+    fn nueva() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let term = signal(SignalKind::terminate())
+                .map_err(|e| tracing::warn!("cannot listen for SIGTERM: {e}"))
+                .ok();
+            Parada { term }
+        }
+        #[cfg(not(unix))]
+        Parada {}
+    }
+
+    async fn esperar(&mut self) {
+        #[cfg(unix)]
+        if let Some(term) = self.term.as_mut() {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 fn imprimir_rutas(config: &Config) {

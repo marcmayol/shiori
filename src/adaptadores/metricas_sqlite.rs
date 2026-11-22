@@ -2,7 +2,9 @@
 //! el proxy nunca espera al disco.
 
 use std::path::Path;
+use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::thread::JoinHandle;
 
 use rusqlite::{Connection, params};
 use serde::Serialize;
@@ -40,10 +42,13 @@ CREATE INDEX IF NOT EXISTS llamadas_proyecto ON llamadas(proyecto, momento_ms);
 enum Mensaje {
     Llamada(Box<Llamada>),
     Vaciar(mpsc::Sender<()>),
+    /// Guarda lo pendiente y termina el hilo (lo manda `Drop`).
+    Cerrar,
 }
 
 pub struct MetricasSqlite {
     tx: SyncSender<Mensaje>,
+    hilo: Mutex<Option<JoinHandle<()>>>,
 }
 
 pub fn abrir(ruta: &Path) -> Result<Connection, String> {
@@ -71,11 +76,22 @@ impl MetricasSqlite {
     pub fn nuevo(ruta: &Path) -> Result<Self, String> {
         let conexion = abrir(ruta)?;
         let (tx, rx) = mpsc::sync_channel(10_000);
-        std::thread::Builder::new()
+        let hilo = std::thread::Builder::new()
             .name("shiori-metricas".into())
             .spawn(move || escritor(conexion, rx))
             .map_err(|e| e.to_string())?;
-        Ok(MetricasSqlite { tx })
+        Ok(MetricasSqlite {
+            tx,
+            hilo: Mutex::new(Some(hilo)),
+        })
+    }
+}
+
+/// Al soltarlo, igual que `cerrar`: si no, la conexión sigue abierta un rato y en Windows no se
+/// puede borrar el archivo (le pasaba a `shiori bench`).
+impl Drop for MetricasSqlite {
+    fn drop(&mut self) {
+        self.cerrar();
     }
 }
 
@@ -98,10 +114,21 @@ impl AlmacenMetricas for MetricasSqlite {
             let _ = rx.recv();
         }
     }
+
+    /// Espera a que el hilo guarde lo pendiente y cierre la base.
+    fn cerrar(&self) {
+        let hilo = self.hilo.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(h) = hilo
+            && self.tx.send(Mensaje::Cerrar).is_ok()
+        {
+            let _ = h.join();
+        }
+    }
 }
 
 fn escritor(mut conexion: Connection, rx: Receiver<Mensaje>) {
-    while let Ok(primero) = rx.recv() {
+    let mut cerrar = false;
+    while !cerrar && let Ok(primero) = rx.recv() {
         let mut lote = vec![primero];
         while let Ok(m) = rx.try_recv() {
             lote.push(m);
@@ -109,6 +136,8 @@ fn escritor(mut conexion: Connection, rx: Receiver<Mensaje>) {
                 break;
             }
         }
+        // Fuera de la transacción: aunque falle una escritura, el hilo acaba y `Drop` no se cuelga.
+        cerrar = lote.iter().any(|m| matches!(m, Mensaje::Cerrar));
         let mut avisos = Vec::new();
         let resultado = (|| -> rusqlite::Result<()> {
             let t = conexion.transaction()?;
@@ -145,6 +174,7 @@ fn escritor(mut conexion: Connection, rx: Receiver<Mensaje>) {
                             ])?;
                         }
                         Mensaje::Vaciar(tx) => avisos.push(tx.clone()),
+                        Mensaje::Cerrar => {}
                     }
                 }
             }

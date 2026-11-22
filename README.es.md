@@ -81,6 +81,8 @@ Prioridad, de menos a más: valores por defecto, archivo global, variables de en
 
 También se puede configurar con TOML: [mira cómo](docs/toml.md).
 
+Para llegar a las APIs, Shiori hace caso a las variables del proxy del sistema (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`), que es lo que hace falta detrás de un proxy de empresa. Los destinos de este mismo equipo (`127.0.0.1`, `::1`, `localhost`) van siempre directos. Por `http://` sin cifrar, el proxy ve las cabeceras de la petición, claves de la API incluidas; los destinos que no deben pasar por él van en `NO_PROXY`.
+
 ## Métricas y coste
 
 Shiori lee el uso que devuelve cada API (entrada, salida, lectura y escritura de caché) sin tocar la respuesta y guarda una fila por llamada en SQLite. El coste sale de la tabla integrada de precios de Anthropic; los demás modelos se añaden en `prices:`. Con suscripción, el coste es el equivalente de la API, no lo que pagas: la columna `auth` separa `api_key` de `subscription`.
