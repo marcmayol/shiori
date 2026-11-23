@@ -711,24 +711,48 @@ async fn al_soltar_el_servidor_sin_parar_la_base_queda_cerrada() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn bench_no_deja_su_base_en_temp() {
-    let informe = shiori::bench::ejecutar(shiori::bench::OpcionesBench {
-        peticiones: 20,
-        concurrencia: 2,
-        tokens: 5,
-        ..Default::default()
-    })
+    let base = tempfile::tempdir().unwrap();
+    let informe = shiori::bench::ejecutar_en(
+        shiori::bench::OpcionesBench {
+            peticiones: 20,
+            concurrencia: 2,
+            tokens: 5,
+            ..Default::default()
+        },
+        base.path(),
+    )
     .await
     .unwrap();
     assert!(informe.results.iter().all(|m| m.errors == 0));
-    for r in shiori::bench::archivos_metricas(&shiori::bench::ruta_metricas_bench()) {
-        assert!(!r.exists(), "quedó {}", r.display());
-    }
+    let restos: Vec<_> = std::fs::read_dir(base.path()).unwrap().collect();
+    assert!(restos.is_empty(), "quedó {restos:?}");
     let cero = shiori::bench::ejecutar(shiori::bench::OpcionesBench {
         peticiones: 0,
         ..Default::default()
     })
     .await;
     assert!(cero.is_err());
+}
+
+#[test]
+fn la_carpeta_del_bench_es_aleatoria_privada_y_se_borra() {
+    let base = tempfile::tempdir().unwrap();
+    let a = shiori::bench::CarpetaBench::crear(base.path()).unwrap();
+    let b = shiori::bench::CarpetaBench::crear(base.path()).unwrap();
+    // Con el nombre fijo de antes (shiori-bench-<pid>.db) otro usuario podía adelantarse.
+    assert_ne!(a.ruta(), b.ruta());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let modo = std::fs::metadata(a.ruta()).unwrap().permissions().mode();
+        assert_eq!(modo & 0o777, 0o700);
+    }
+    std::fs::write(a.ruta().join("metrics.db"), b"x").unwrap();
+    let ruta = a.ruta().to_path_buf();
+    drop(a);
+    drop(b);
+    assert!(!ruta.exists());
+    assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

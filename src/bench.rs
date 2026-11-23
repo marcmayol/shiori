@@ -158,6 +158,14 @@ async fn medir(
 }
 
 pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
+    ejecutar_en(op, &std::env::temp_dir()).await
+}
+
+/// Como [`ejecutar`], con la carpeta de usar y tirar dentro de `base_temporal`.
+pub async fn ejecutar_en(
+    op: OpcionesBench,
+    base_temporal: &std::path::Path,
+) -> Result<Informe, String> {
     if op.peticiones == 0 || op.concurrencia == 0 {
         return Err("requests and concurrency must be at least 1".into());
     }
@@ -173,10 +181,10 @@ pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
     .await
     .map_err(|e| format!("cannot start the fake server: {e}"))?;
 
-    let ruta_metricas = ruta_metricas_bench();
+    let carpeta = CarpetaBench::crear(base_temporal)?;
     let mut config = Config {
         metricas: op.metricas,
-        ruta_metricas: ruta_metricas.clone(),
+        ruta_metricas: carpeta.ruta().join("metrics.db"),
         ..Config::default()
     };
     for p in Proveedor::TODOS {
@@ -216,14 +224,7 @@ pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
     // `parar` suelta las métricas y espera a que se cierre la base: en Windows no se puede borrar
     // un archivo abierto.
     proxy.parar().await;
-    for r in archivos_metricas(&ruta_metricas) {
-        match std::fs::remove_file(&r) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                tracing::warn!("cannot delete {}: {e}", r.display())
-            }
-            _ => {}
-        }
-    }
+    drop(carpeta);
     Ok(Informe {
         requests: op.peticiones,
         concurrency: op.concurrencia,
@@ -237,9 +238,49 @@ pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
     })
 }
 
-/// Base de métricas de usar y tirar del bench (se borra al acabar).
-pub fn ruta_metricas_bench() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("shiori-bench-{}.db", std::process::id()))
+/// Carpeta de usar y tirar para la base de métricas del bench: nombre aleatorio y, en Unix, solo
+/// del usuario. Con un nombre fijo en un temp compartido, otro usuario podía crear antes el
+/// archivo (o un enlace) y hacer fallar el bench o que escribiera en lo suyo.
+/// `DirBuilder::create` falla si ya existe algo con ese nombre. Al soltarla se borra entera.
+pub struct CarpetaBench(std::path::PathBuf);
+
+impl CarpetaBench {
+    pub fn crear(base: &std::path::Path) -> Result<Self, String> {
+        let mut bytes = [0u8; 12];
+        getrandom::fill(&mut bytes)
+            .map_err(|e| format!("cannot create the bench folder name: {e}"))?;
+        let nombre: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let ruta = base.join(format!("shiori-bench-{nombre}"));
+        #[cfg(unix)]
+        let constructor = {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut c = std::fs::DirBuilder::new();
+            c.mode(0o700);
+            c
+        };
+        #[cfg(not(unix))]
+        let constructor = std::fs::DirBuilder::new();
+        constructor
+            .create(&ruta)
+            .map_err(|e| format!("cannot create {}: {e}", ruta.display()))?;
+        Ok(CarpetaBench(ruta))
+    }
+
+    pub fn ruta(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for CarpetaBench {
+    // La base tiene que estar cerrada antes: en Windows no se puede borrar un archivo abierto.
+    fn drop(&mut self) {
+        match std::fs::remove_dir_all(&self.0) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                tracing::warn!("cannot delete {}: {e}", self.0.display())
+            }
+            _ => {}
+        }
+    }
 }
 
 /// La base de métricas y los archivos que deja SQLite al lado (WAL).
