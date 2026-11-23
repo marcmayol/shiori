@@ -304,6 +304,100 @@ fn sigterm_para_en_orden() {
     assert!(!clave.exists(), "la clave de parada tiene que borrarse");
 }
 
+/// La primera señal deja acabar las llamadas en curso; con un streaming largo, la segunda tiene que
+/// parar al momento (si no, solo queda `kill -9`).
+#[cfg(unix)]
+#[test]
+fn segunda_sigterm_para_al_momento() {
+    use std::io::{Read, Write};
+    let dir = tempfile::tempdir().unwrap();
+    let puerto_falso = puerto_libre();
+    // 100 tokens cada 150 ms: unos 15 s de streaming.
+    let _falso = Hijo(
+        Command::new(SHIORI)
+            .args(["fake", "--port", &puerto_falso.to_string()])
+            .args(["--tokens", "100", "--token-delay-ms", "150"])
+            .env("SHIORI_LOG", "warn")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let falso_listo = (0..100).any(|_| {
+        let ok = std::net::TcpStream::connect(("127.0.0.1", puerto_falso)).is_ok();
+        if !ok {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        ok
+    });
+    assert!(falso_listo, "shiori fake no arrancó");
+    let puerto = puerto_libre();
+    let entorno = [(
+        "SHIORI_UPSTREAM_ANTHROPIC",
+        format!("http://127.0.0.1:{puerto_falso}"),
+    )];
+    let mut s = serve(dir.path(), puerto, &entorno);
+    esperar_salud(puerto);
+    let clave = dir.path().join(format!("server-{puerto}.key"));
+    assert!(clave.exists());
+    // La señal va cuando el streaming ya ha empezado: si no, el cierre en orden acabaría solo.
+    let mut llamada = std::net::TcpStream::connect(("127.0.0.1", puerto)).unwrap();
+    llamada
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    let cuerpo = r#"{"model":"claude-haiku-5-5","max_tokens":100,"stream":true,"messages":[]}"#;
+    write!(
+        llamada,
+        "POST /v1/messages HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\n\
+         x-api-key: sk-ant-api-prueba\r\nContent-Length: {}\r\n\r\n{cuerpo}",
+        cuerpo.len()
+    )
+    .unwrap();
+    let mut trozo = [0u8; 64];
+    let n = llamada.read(&mut trozo).unwrap();
+    assert!(
+        trozo[..n].starts_with(b"HTTP/1.1 200"),
+        "{}",
+        String::from_utf8_lossy(&trozo[..n])
+    );
+    let matar = |s: &Hijo| {
+        let k = Command::new("kill")
+            .args(["-TERM", &s.0.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(k.success());
+    };
+    matar(&s);
+    // La primera señal hace dejar de escuchar (el apagado empezó), pero no mata el proceso.
+    let cerrado = (0..30).any(|_| {
+        let libre = std::net::TcpStream::connect(("127.0.0.1", puerto)).is_err();
+        if !libre {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        libre
+    });
+    assert!(cerrado, "la primera SIGTERM no hizo dejar de escuchar a serve");
+    assert!(
+        s.0.try_wait().unwrap().is_none(),
+        "la primera SIGTERM tiene que esperar al streaming en curso"
+    );
+    matar(&s);
+    let mut estado = None;
+    for _ in 0..30 {
+        if let Some(e) = s.0.try_wait().unwrap() {
+            estado = Some(e);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    // Al streaming le quedan más de 10 s: salir antes de 3 s solo puede ser la salida forzada.
+    let estado = estado.expect("la segunda SIGTERM no paró serve en 3 s");
+    assert_eq!(estado.code(), Some(1), "{estado:?}");
+    assert!(!clave.exists(), "la clave de parada tiene que borrarse");
+    drop(llamada);
+}
+
 #[cfg(windows)]
 #[test]
 fn un_solo_serve_por_puerto_en_windows() {
