@@ -377,7 +377,10 @@ fn segunda_sigterm_para_al_momento() {
         }
         libre
     });
-    assert!(cerrado, "la primera SIGTERM no hizo dejar de escuchar a serve");
+    assert!(
+        cerrado,
+        "la primera SIGTERM no hizo dejar de escuchar a serve"
+    );
     assert!(
         s.0.try_wait().unwrap().is_none(),
         "la primera SIGTERM tiene que esperar al streaming en curso"
