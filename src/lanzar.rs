@@ -73,19 +73,29 @@ pub fn bloquear_puerto(config: &Config) -> Result<Option<std::fs::File>, String>
     if let Some(c) = ruta.parent() {
         std::fs::create_dir_all(c).map_err(|e| format!("cannot create {}: {e}", c.display()))?;
     }
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .share_mode(0)
-        .open(&ruta)
-    {
-        Ok(f) => Ok(Some(f)),
-        Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => Err(format!(
-            "another Shiori is already running on port {} (`shiori status`)",
-            config.port
-        )),
-        Err(e) => Err(format!("cannot open {}: {e}", ruta.display())),
+    // `status`, `stop` y `run` miran el bloqueo abriéndolo un instante: eso no es otro servidor.
+    let mut intentos = 0;
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(&ruta)
+        {
+            Ok(f) => return Ok(Some(f)),
+            Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION) && intentos < 5 => {
+                intentos += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
+                return Err(format!(
+                    "another Shiori is already running on port {} (`shiori status`)",
+                    config.port
+                ));
+            }
+            Err(e) => return Err(format!("cannot open {}: {e}", ruta.display())),
+        }
     }
 }
 
@@ -148,10 +158,28 @@ fn escribir_privado(ruta: &Path, texto: &str) -> std::io::Result<()> {
     std::fs::write(ruta, texto)
 }
 
-pub async fn parar(config: &Config) -> Result<bool, String> {
-    let Estado::EnMarcha { .. } = estado(config).await else {
-        return Ok(false);
-    };
+/// Lo que ha pasado con `shiori stop`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Parado {
+    /// No había ningún Shiori en el puerto.
+    NoEstaba,
+    /// El servidor ha terminado.
+    Terminado,
+    /// Ya no escucha, pero sigue vivo hasta que acaben las llamadas en curso (un streaming largo
+    /// puede durar minutos). Solo en Windows, donde se ve por el bloqueo.
+    Terminando,
+}
+
+/// Tras cerrar el puerto, el servidor aún guarda las métricas: lo normal es que suelte el bloqueo
+/// enseguida. Si no lo suelta en este plazo, es que hay llamadas en curso.
+const MARGEN_BLOQUEO: Duration = Duration::from_secs(3);
+
+pub async fn parar(config: &Config) -> Result<Parado, String> {
+    match estado(config).await {
+        Estado::EnMarcha { .. } => {}
+        Estado::Parado if bloqueado(config) => return Ok(Parado::Terminando),
+        _ => return Ok(Parado::NoEstaba),
+    }
     let clave = std::fs::read_to_string(ruta_clave(config)).map_err(|e| {
         format!(
             "cannot read the stop key ({}): {e}",
@@ -167,13 +195,41 @@ pub async fn parar(config: &Config) -> Result<bool, String> {
     if !r.status().is_success() {
         return Err(format!("the server refused to stop ({})", r.status()));
     }
+    let mut cerrado = false;
     for _ in 0..100 {
-        if matches!(estado(config).await, Estado::Parado) && !bloqueado(config) {
-            return Ok(true);
+        if matches!(estado(config).await, Estado::Parado) {
+            cerrado = true;
+            break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Err("the server did not stop within 10 seconds".into())
+    if !cerrado {
+        return Err("the server did not stop within 10 seconds".into());
+    }
+    if esperar_desbloqueo(config, MARGEN_BLOQUEO).await {
+        Ok(Parado::Terminado)
+    } else {
+        Ok(Parado::Terminando)
+    }
+}
+
+/// ¿Hay un `serve` de este puerto que ya no escucha pero sigue terminando llamadas?
+pub fn terminando(config: &Config) -> bool {
+    bloqueado(config)
+}
+
+/// Espera a que el `serve` anterior suelte el bloqueo; `false` si no lo suelta en ese plazo.
+async fn esperar_desbloqueo(config: &Config, plazo: Duration) -> bool {
+    let fin = tokio::time::Instant::now() + plazo;
+    loop {
+        if !bloqueado(config) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= fin {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 /// Si Shiori no está escuchando, lo arranca en segundo plano (`shiori serve`) y espera a que responda.
@@ -187,6 +243,26 @@ pub async fn asegurar_servidor(config: &Config) -> Result<(), String> {
             ));
         }
         Estado::Parado => {}
+    }
+    // Un `stop` justo antes puede haber dejado al anterior terminando llamadas: un `serve` nuevo
+    // no arrancaría mientras tenga el bloqueo.
+    let mut libre = false;
+    for _ in 0..100 {
+        if !bloqueado(config) {
+            libre = true;
+            break;
+        }
+        // O es el `serve` que acaba de lanzar otro `run` a la vez: entonces ya está.
+        if let Estado::EnMarcha { .. } = estado(config).await {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    if !libre {
+        return Err(format!(
+            "the previous Shiori on port {} is still finishing its calls (`shiori status`)",
+            config.port
+        ));
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let log = ruta_log();

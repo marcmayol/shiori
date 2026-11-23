@@ -352,3 +352,64 @@ fn un_solo_serve_por_puerto_en_windows() {
         "no tiene que pisar la clave de parada del otro"
     );
 }
+
+/// Un streaming largo no hace fallar `stop`: el servidor deja de escuchar enseguida y termina la
+/// llamada antes de salir. En Windows el bloqueo sigue cogido hasta entonces y `stop` lo dice.
+#[test]
+fn stop_con_streaming_en_curso_sale_bien() {
+    let dir = tempfile::tempdir().unwrap();
+    let puerto_falso = puerto_libre();
+    // 40 tokens cada 300 ms: unos 12 s de streaming, más que los 10 s que espera `stop`.
+    let _falso = Hijo(
+        Command::new(SHIORI)
+            .args(["fake", "--port", &puerto_falso.to_string()])
+            .args(["--tokens", "40", "--token-delay-ms", "300"])
+            .env("SHIORI_LOG", "warn")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", puerto_falso)).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let puerto = puerto_libre();
+    let falso_url = format!("http://127.0.0.1:{puerto_falso}");
+    let mut s = serve(dir.path(), puerto, &[("SHIORI_UPSTREAM_ANTHROPIC", falso_url)]);
+    esperar_salud(puerto);
+    let llamada = std::thread::spawn(move || {
+        post(
+            puerto,
+            "/v1/messages",
+            r#"{"model":"claude-haiku-5-5","max_tokens":50,"stream":true,"messages":[]}"#,
+        )
+    });
+    // Que la llamada ya esté en curso al parar.
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let o = shiori(dir.path(), puerto, &["stop"]);
+    assert!(o.status.success(), "{}", texto(&o));
+    if cfg!(windows) {
+        assert!(texto(&o).contains("Shiori stopped listening"), "{}", texto(&o));
+        let st = shiori(dir.path(), puerto, &["status"]);
+        assert!(texto(&st).contains("Shiori is stopping"), "{}", texto(&st));
+    } else {
+        assert!(texto(&o).contains("Shiori stopped"), "{}", texto(&o));
+    }
+    let r = llamada.join().unwrap();
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+    assert!(r.contains("message_stop"), "el streaming tiene que acabar entero: {r}");
+    let mut estado = None;
+    for _ in 0..100 {
+        if let Some(e) = s.0.try_wait().unwrap() {
+            estado = Some(e);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let estado = estado.expect("serve no salió al acabar la llamada");
+    assert!(estado.success(), "{estado:?}");
+}

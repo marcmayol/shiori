@@ -175,6 +175,10 @@ async fn ejecutar(comando: Comando) -> Result<i32, String> {
                         config.url_local()
                     )
                 }
+                lanzar::Estado::Parado if lanzar::terminando(&config) => println!(
+                    "Shiori is stopping: {} is free, the calls in progress are finishing",
+                    config.url_local()
+                ),
                 lanzar::Estado::Parado => {
                     println!("Shiori is not running ({} is free)", config.url_local())
                 }
@@ -188,10 +192,14 @@ async fn ejecutar(comando: Comando) -> Result<i32, String> {
         }
         Comando::Stop => {
             let config = cargar_config()?;
-            if lanzar::parar(&config).await? {
-                println!("Shiori stopped");
-            } else {
-                println!("Shiori was not running at {}", config.url_local());
+            match lanzar::parar(&config).await? {
+                lanzar::Parado::Terminado => println!("Shiori stopped"),
+                lanzar::Parado::Terminando => {
+                    println!("Shiori stopped listening; the calls in progress will finish first")
+                }
+                lanzar::Parado::NoEstaba => {
+                    println!("Shiori was not running at {}", config.url_local())
+                }
             }
             Ok(0)
         }
