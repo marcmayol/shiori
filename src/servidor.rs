@@ -32,12 +32,13 @@ impl ServidorEnMarcha {
         self.metricas.vaciar();
     }
 
-    /// Para de aceptar peticiones, deja terminar las que están en curso y guarda las métricas.
+    /// Para de aceptar peticiones, deja terminar las que están en curso, guarda las métricas y
+    /// cierra la base (sin esperar a que se suelte la última copia, que puede tener una conexión).
     pub async fn parar(self) {
         self.apagar.notify_one();
         let _ = self.tarea.await;
         let m = self.metricas.clone();
-        let _ = tokio::task::spawn_blocking(move || m.vaciar()).await;
+        let _ = tokio::task::spawn_blocking(move || m.cerrar()).await;
     }
 
     /// Espera a que el servidor termine (por `/_shiori/stop` o por `parar`).
@@ -47,7 +48,7 @@ impl ServidorEnMarcha {
             .await
             .unwrap_or_else(|e| Err(std::io::Error::other(e)));
         let m = self.metricas.clone();
-        let _ = tokio::task::spawn_blocking(move || m.vaciar()).await;
+        let _ = tokio::task::spawn_blocking(move || m.cerrar()).await;
         r
     }
 

@@ -37,6 +37,11 @@ pub trait AlmacenMetricas: Send + Sync + 'static {
     fn registrar(&self, llamada: Llamada);
     /// Espera a que lo registrado esté guardado (al parar y en los tests).
     fn vaciar(&self);
+    /// Guarda lo pendiente y suelta el almacenamiento (al parar el servidor). Después, `registrar`
+    /// ya no guarda nada.
+    fn cerrar(&self) {
+        self.vaciar();
+    }
 }
 
 /// Métricas desactivadas.

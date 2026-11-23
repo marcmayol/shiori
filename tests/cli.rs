@@ -151,3 +151,348 @@ fn serve_avisa_si_el_puerto_esta_ocupado() {
     assert!(!o.status.success());
     assert!(texto(&o).contains("already in use"), "{}", texto(&o));
 }
+
+#[test]
+fn bench_rechaza_cero() {
+    let dir = tempfile::tempdir().unwrap();
+    for args in [
+        ["bench", "--requests", "0"],
+        ["bench", "--concurrency", "0"],
+    ] {
+        let o = shiori(dir.path(), puerto_libre(), &args);
+        assert_eq!(o.status.code(), Some(2), "{}", texto(&o));
+        assert!(texto(&o).contains("must be at least 1"), "{}", texto(&o));
+    }
+}
+
+/// Espera a que `serve` responda en su puerto.
+fn esperar_salud(puerto: u16) {
+    const SALUD: &[u8] = b"GET /_shiori/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    for _ in 0..100 {
+        if let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", puerto)) {
+            use std::io::{Read, Write};
+            let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+            let _ = s.write_all(SALUD);
+            let mut r = String::new();
+            let _ = s.read_to_string(&mut r);
+            if r.contains("\"shiori\"") {
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("shiori serve no arrancó en el puerto {puerto}");
+}
+
+/// Una petición HTTP/1.1 a mano: devuelve la respuesta entera.
+fn post(puerto: u16, ruta: &str, cuerpo: &str) -> String {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", puerto)).unwrap();
+    s.set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    write!(
+        s,
+        "POST {ruta} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\n\
+         x-api-key: sk-ant-api-prueba\r\nContent-Length: {}\r\n\r\n{cuerpo}",
+        cuerpo.len()
+    )
+    .unwrap();
+    let mut r = String::new();
+    let _ = s.read_to_string(&mut r);
+    r
+}
+
+/// Un proceso hijo que se para (y se espera) aunque el test falle.
+struct Hijo(std::process::Child);
+
+impl Drop for Hijo {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn serve(datos: &Path, puerto: u16, entorno: &[(&str, String)]) -> Hijo {
+    let mut c = Command::new(SHIORI);
+    c.arg("serve")
+        .env("SHIORI_DATA_DIR", datos)
+        .env("SHIORI_METRICS_PATH", datos.join("metrics.db"))
+        .env("SHIORI_CONFIG", "")
+        .env("SHIORI_PORT", puerto.to_string())
+        .env_remove("SHIORI_HOST")
+        .env("SHIORI_LOG", "warn")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    for (k, v) in entorno {
+        c.env(k, v);
+    }
+    Hijo(c.spawn().unwrap())
+}
+
+#[test]
+fn proxy_del_sistema_no_se_usa_para_destinos_locales() {
+    let dir = tempfile::tempdir().unwrap();
+    let puerto_falso = puerto_libre();
+    let _falso = Hijo(
+        Command::new(SHIORI)
+            .args(["fake", "--port", &puerto_falso.to_string()])
+            .env("SHIORI_LOG", "warn")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    // Un proxy del sistema en un puerto donde no escucha nadie: si se usara, la llamada daría 502.
+    let cerrado = format!("http://127.0.0.1:{}", puerto_libre());
+    let puerto = puerto_libre();
+    let falso_url = format!("http://127.0.0.1:{puerto_falso}");
+    let mut entorno = vec![("SHIORI_UPSTREAM_ANTHROPIC", falso_url)];
+    for k in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        entorno.push((k, cerrado.clone()));
+    }
+    let _serve = serve(dir.path(), puerto, &entorno);
+    esperar_salud(puerto);
+    // Que el falso también esté escuchando.
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", puerto_falso)).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let r = post(
+        puerto,
+        "/v1/messages",
+        r#"{"model":"claude-haiku-5-5","max_tokens":10,"messages":[]}"#,
+    );
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+    assert!(r.contains("msg_fake"), "{r}");
+}
+
+#[cfg(unix)]
+#[test]
+fn sigterm_para_en_orden() {
+    let dir = tempfile::tempdir().unwrap();
+    let puerto = puerto_libre();
+    let mut s = serve(dir.path(), puerto, &[]);
+    esperar_salud(puerto);
+    let clave = dir.path().join(format!("server-{puerto}.key"));
+    assert!(clave.exists());
+    let k = Command::new("kill")
+        .args(["-TERM", &s.0.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(k.success());
+    let mut estado = None;
+    for _ in 0..100 {
+        if let Some(e) = s.0.try_wait().unwrap() {
+            estado = Some(e);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let estado = estado.expect("serve no paró con SIGTERM");
+    assert_eq!(estado.code(), Some(0), "{estado:?}");
+    assert!(!clave.exists(), "la clave de parada tiene que borrarse");
+}
+
+#[cfg(windows)]
+#[test]
+fn un_solo_serve_por_puerto_en_windows() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let puerto = puerto_libre();
+    // Otro `serve` del mismo puerto tiene el bloqueo abierto.
+    let _bloqueo = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(dir.path().join(format!("server-{puerto}.lock")))
+        .unwrap();
+    // Con `output()`, un `serve` que arrancara colgaría el test: se lanza y se espera con plazo.
+    let mut c = Command::new(SHIORI);
+    c.arg("serve")
+        .env("SHIORI_DATA_DIR", dir.path())
+        .env("SHIORI_METRICS_PATH", dir.path().join("metrics.db"))
+        .env("SHIORI_CONFIG", "")
+        .env("SHIORI_PORT", puerto.to_string())
+        .env_remove("SHIORI_HOST")
+        .env("SHIORI_LOG", "warn")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let mut s = Hijo(c.spawn().unwrap());
+    let mut estado = None;
+    for _ in 0..100 {
+        if let Some(e) = s.0.try_wait().unwrap() {
+            estado = Some(e);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let estado = estado.expect("el segundo serve arrancó en vez de negarse");
+    assert!(!estado.success());
+    let mut error = String::new();
+    std::io::Read::read_to_string(s.0.stderr.as_mut().unwrap(), &mut error).unwrap();
+    assert!(
+        error.contains("another Shiori is already running"),
+        "{error}"
+    );
+    assert!(
+        !dir.path().join(format!("server-{puerto}.key")).exists(),
+        "no tiene que pisar la clave de parada del otro"
+    );
+}
+
+/// Un streaming largo no hace fallar `stop`: el servidor deja de escuchar enseguida y termina la
+/// llamada antes de salir. En Windows el bloqueo sigue cogido hasta entonces y `stop` lo dice.
+#[test]
+fn stop_con_streaming_en_curso_sale_bien() {
+    let dir = tempfile::tempdir().unwrap();
+    let puerto_falso = puerto_libre();
+    // 40 tokens cada 300 ms: unos 12 s de streaming, más que los 10 s que espera `stop`.
+    let _falso = Hijo(
+        Command::new(SHIORI)
+            .args(["fake", "--port", &puerto_falso.to_string()])
+            .args(["--tokens", "40", "--token-delay-ms", "300"])
+            .env("SHIORI_LOG", "warn")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", puerto_falso)).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let puerto = puerto_libre();
+    let falso_url = format!("http://127.0.0.1:{puerto_falso}");
+    let mut s = serve(
+        dir.path(),
+        puerto,
+        &[("SHIORI_UPSTREAM_ANTHROPIC", falso_url)],
+    );
+    esperar_salud(puerto);
+    let llamada = std::thread::spawn(move || {
+        post(
+            puerto,
+            "/v1/messages",
+            r#"{"model":"claude-haiku-5-5","max_tokens":50,"stream":true,"messages":[]}"#,
+        )
+    });
+    // Que la llamada ya esté en curso al parar.
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let o = shiori(dir.path(), puerto, &["stop"]);
+    assert!(o.status.success(), "{}", texto(&o));
+    if cfg!(windows) {
+        assert!(
+            texto(&o).contains("Shiori stopped listening"),
+            "{}",
+            texto(&o)
+        );
+        let st = shiori(dir.path(), puerto, &["status"]);
+        assert!(texto(&st).contains("Shiori is stopping"), "{}", texto(&st));
+    } else {
+        assert!(texto(&o).contains("Shiori stopped"), "{}", texto(&o));
+    }
+    let r = llamada.join().unwrap();
+    assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+    assert!(
+        r.contains("message_stop"),
+        "el streaming tiene que acabar entero: {r}"
+    );
+    let mut estado = None;
+    for _ in 0..100 {
+        if let Some(e) = s.0.try_wait().unwrap() {
+            estado = Some(e);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let estado = estado.expect("serve no salió al acabar la llamada");
+    assert!(estado.success(), "{estado:?}");
+}
+
+/// En Unix nada impide un `serve` nuevo mientras el anterior termina sus llamadas tras un `stop`.
+/// Al salir, el viejo no puede borrar la clave de parada del nuevo: si no, `stop` ya no lo para.
+#[cfg(unix)]
+#[test]
+fn el_serve_viejo_no_borra_la_clave_del_nuevo() {
+    let dir = tempfile::tempdir().unwrap();
+    let puerto_falso = puerto_libre();
+    // 20 tokens cada 150 ms: unos 3 s de streaming.
+    let _falso = Hijo(
+        Command::new(SHIORI)
+            .args(["fake", "--port", &puerto_falso.to_string()])
+            .args(["--tokens", "20", "--token-delay-ms", "150"])
+            .env("SHIORI_LOG", "warn")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", puerto_falso)).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let puerto = puerto_libre();
+    let falso_url = format!("http://127.0.0.1:{puerto_falso}");
+    let entorno = [("SHIORI_UPSTREAM_ANTHROPIC", falso_url)];
+    let mut viejo = serve(dir.path(), puerto, &entorno);
+    esperar_salud(puerto);
+    let llamada = std::thread::spawn(move || {
+        post(
+            puerto,
+            "/v1/messages",
+            r#"{"model":"claude-haiku-5-5","max_tokens":50,"stream":true,"messages":[]}"#,
+        )
+    });
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let o = shiori(dir.path(), puerto, &["stop"]);
+    assert!(o.status.success(), "{}", texto(&o));
+    let mut nuevo = serve(dir.path(), puerto, &entorno);
+    esperar_salud(puerto);
+    // Si no, el caso no se da: el viejo ya habría salido borrando su propia clave.
+    assert!(
+        viejo.0.try_wait().unwrap().is_none(),
+        "el serve viejo acabó antes de arrancar el nuevo"
+    );
+    assert!(llamada.join().unwrap().starts_with("HTTP/1.1 200"));
+    let salida = |h: &mut Hijo| {
+        for _ in 0..100 {
+            if let Some(e) = h.0.try_wait().unwrap() {
+                return Some(e);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        None
+    };
+    assert!(
+        salida(&mut viejo)
+            .expect("el serve viejo no salió")
+            .success()
+    );
+    assert!(dir.path().join(format!("server-{puerto}.key")).exists());
+    let o = shiori(dir.path(), puerto, &["stop"]);
+    assert!(o.status.success(), "{}", texto(&o));
+    assert!(
+        salida(&mut nuevo)
+            .expect("stop no paró el serve nuevo")
+            .success()
+    );
+}

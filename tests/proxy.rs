@@ -658,3 +658,102 @@ async fn head_sin_cuerpo_no_es_un_corte() {
     assert_eq!(l.metodo, "HEAD");
     assert!(!l.cancelada);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn al_parar_la_base_de_metricas_queda_cerrada() {
+    let e = entorno(OpcionesFalso::default()).await;
+    e.cliente
+        .post(e.url("/v1/messages"))
+        .json(&cuerpo_anthropic(false))
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    e.llamadas(1).await;
+    e.proxy.parar().await;
+    // En Windows no se puede borrar un archivo abierto: si la conexión siguiera viva, fallaría.
+    for r in shiori::bench::archivos_metricas(&e.metricas) {
+        match std::fs::remove_file(&r) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                panic!("{} sigue abierto: {err}", r.display())
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bench_no_deja_su_base_en_temp() {
+    let informe = shiori::bench::ejecutar(shiori::bench::OpcionesBench {
+        peticiones: 20,
+        concurrencia: 2,
+        tokens: 5,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    assert!(informe.results.iter().all(|m| m.errors == 0));
+    for r in shiori::bench::archivos_metricas(&shiori::bench::ruta_metricas_bench()) {
+        assert!(!r.exists(), "quedó {}", r.display());
+    }
+    let cero = shiori::bench::ejecutar(shiori::bench::OpcionesBench {
+        peticiones: 0,
+        ..Default::default()
+    })
+    .await;
+    assert!(cero.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn el_falso_solo_recuerda_las_ultimas() {
+    let falso = shiori::falso::arrancar("127.0.0.1:0", OpcionesFalso::default())
+        .await
+        .unwrap();
+    let cliente = comun::cliente();
+    let total = shiori::falso::MAX_VISTAS + 10;
+    for i in 0..total {
+        cliente
+            .get(format!("{}/v1/models?n={i}", falso.url()))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+    }
+    let vistas = falso.vistas();
+    assert_eq!(vistas.len(), shiori::falso::MAX_VISTAS);
+    assert_eq!(vistas[0].ruta, "/v1/models?n=10");
+    assert_eq!(
+        falso.ultima().unwrap().ruta,
+        format!("/v1/models?n={}", total - 1)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn el_retraso_entre_tokens_cumple_lo_pedido() {
+    let falso = shiori::falso::arrancar("127.0.0.1:0", OpcionesFalso::default())
+        .await
+        .unwrap();
+    let cliente = comun::cliente();
+    // 50 tokens a 2 ms: unos 110 ms (55 trozos). Con una espera tras otra, en Windows cada una
+    // duraba un tic de ~15,6 ms y el total pasaba de 800 ms.
+    let inicio = Instant::now();
+    let cuerpo = cliente
+        .post(format!("{}/v1/messages", falso.url()))
+        .header("x-fake-tokens", "50")
+        .header("x-fake-delay-ms", "2")
+        .json(&cuerpo_anthropic(true))
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let ms = inicio.elapsed().as_millis();
+    assert!(String::from_utf8_lossy(&cuerpo).contains("message_stop"));
+    assert!(ms >= 100, "demasiado rápido: {ms} ms");
+    assert!(ms < 500, "demasiado lento: {ms} ms");
+}

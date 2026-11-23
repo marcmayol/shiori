@@ -158,6 +158,9 @@ async fn medir(
 }
 
 pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
+    if op.peticiones == 0 || op.concurrencia == 0 {
+        return Err("requests and concurrency must be at least 1".into());
+    }
     let rss_before_mb = rss_mb();
     let falso = falso::arrancar(
         "127.0.0.1:0",
@@ -170,8 +173,7 @@ pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
     .await
     .map_err(|e| format!("cannot start the fake server: {e}"))?;
 
-    let ruta_metricas =
-        std::env::temp_dir().join(format!("shiori-bench-{}.db", std::process::id()));
+    let ruta_metricas = ruta_metricas_bench();
     let mut config = Config {
         metricas: op.metricas,
         ruta_metricas: ruta_metricas.clone(),
@@ -211,11 +213,16 @@ pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
         results.push(s);
     }
     let rss_after_mb = rss_mb();
+    // `parar` suelta las métricas y espera a que se cierre la base: en Windows no se puede borrar
+    // un archivo abierto.
     proxy.parar().await;
-    for sufijo in ["", "-wal", "-shm"] {
-        let mut r = ruta_metricas.clone().into_os_string();
-        r.push(sufijo);
-        let _ = std::fs::remove_file(r);
+    for r in archivos_metricas(&ruta_metricas) {
+        match std::fs::remove_file(&r) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                tracing::warn!("cannot delete {}: {e}", r.display())
+            }
+            _ => {}
+        }
     }
     Ok(Informe {
         requests: op.peticiones,
@@ -228,6 +235,23 @@ pub async fn ejecutar(op: OpcionesBench) -> Result<Informe, String> {
         rss_before_mb,
         rss_after_mb,
     })
+}
+
+/// Base de métricas de usar y tirar del bench (se borra al acabar).
+pub fn ruta_metricas_bench() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("shiori-bench-{}.db", std::process::id()))
+}
+
+/// La base de métricas y los archivos que deja SQLite al lado (WAL).
+pub fn archivos_metricas(ruta: &std::path::Path) -> Vec<std::path::PathBuf> {
+    ["", "-wal", "-shm"]
+        .iter()
+        .map(|sufijo| {
+            let mut r = ruta.as_os_str().to_owned();
+            r.push(sufijo);
+            r.into()
+        })
+        .collect()
 }
 
 pub fn mostrar(i: &Informe) -> String {
