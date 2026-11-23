@@ -140,6 +140,23 @@ fn run_arranca_en_segundo_plano_y_stop_lo_para() {
     assert!(texto(&o).contains("Shiori stopped"), "{}", texto(&o));
     let o = shiori(dir.path(), puerto, &["status"]);
     assert!(texto(&o).contains("not running"), "{}", texto(&o));
+    borrar_cuando_termine(dir);
+}
+
+/// En Windows `stop` vuelve cuando el puerto ya no escucha, pero el proceso tarda un poco más en
+/// soltar la base y el log; sin esperar, la carpeta se quedaría en %TEMP%.
+fn borrar_cuando_termine(dir: tempfile::TempDir) {
+    for _ in 0..100 {
+        match std::fs::remove_dir_all(dir.path()) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+    panic!(
+        "{} sigue en uso 10 s después de parar",
+        dir.path().display()
+    );
 }
 
 #[test]
@@ -592,4 +609,27 @@ fn el_serve_viejo_no_borra_la_clave_del_nuevo() {
             .expect("stop no paró el serve nuevo")
             .success()
     );
+}
+
+#[test]
+fn bench_no_deja_la_base_en_la_carpeta_temporal() {
+    let dir = tempfile::tempdir().unwrap();
+    let temporal = dir.path().join("tmp");
+    std::fs::create_dir(&temporal).unwrap();
+    let o = Command::new(SHIORI)
+        .args(["bench", "--requests", "4", "--concurrency", "2"])
+        .args(["--tokens", "2", "--token-delay-ms", "0"])
+        .env("TEMP", &temporal)
+        .env("TMP", &temporal)
+        .env("TMPDIR", &temporal)
+        .env("SHIORI_LOG", "warn")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", texto(&o));
+    assert!(!texto(&o).contains("cannot delete"), "{}", texto(&o));
+    let quedan: Vec<_> = std::fs::read_dir(&temporal)
+        .unwrap()
+        .map(|f| f.unwrap().file_name())
+        .collect();
+    assert!(quedan.is_empty(), "{quedan:?}");
 }

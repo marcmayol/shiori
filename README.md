@@ -82,7 +82,9 @@ Priority, lowest to highest: defaults, global file, environment variables (`SHIO
 
 You can also configure Shiori with TOML: [see how](docs/toml.md).
 
-To reach the APIs, Shiori follows the system proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`), as you need behind a company proxy. Upstreams on this computer (`127.0.0.1`, `::1`, `localhost`) are always reached directly. Over plain `http://`, a proxy sees the request headers, API keys included; list the hosts that must skip it in `NO_PROXY`.
+### Outgoing proxy
+
+Shiori reaches the APIs through the same proxy as other programs: `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` (or their lowercase forms) in the environment where the proxy starts (`shiori serve`, or the `shiori run` that starts it) and, if none is set, the system proxy (Windows Internet settings, macOS network settings). That is what you need behind a company proxy. Upstreams on this computer (`127.0.0.1`, `::1`, `localhost`) are always reached directly. If that proxy is down, every call fails with a 502 (`cannot reach anthropic: ... tcp connect error`). Over plain `http://`, the proxy sees the request headers, API keys included. List the hosts that must skip it in `NO_PROXY`, for example `NO_PROXY=api.anthropic.com`.
 
 ## Metrics and cost
 

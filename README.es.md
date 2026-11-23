@@ -81,7 +81,9 @@ Prioridad, de menos a más: valores por defecto, archivo global, variables de en
 
 También se puede configurar con TOML: [mira cómo](docs/toml.md).
 
-Para llegar a las APIs, Shiori hace caso a las variables del proxy del sistema (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`), que es lo que hace falta detrás de un proxy de empresa. Los destinos de este mismo equipo (`127.0.0.1`, `::1`, `localhost`) van siempre directos. Por `http://` sin cifrar, el proxy ve las cabeceras de la petición, claves de la API incluidas; los destinos que no deben pasar por él van en `NO_PROXY`.
+### Proxy de salida
+
+Shiori llega a las APIs por el mismo proxy que el resto de programas: `HTTPS_PROXY`, `HTTP_PROXY` y `ALL_PROXY` (o en minúsculas) en el entorno donde arranca el proxy (`shiori serve`, o el `shiori run` que lo arranca) y, si no hay ninguna, el proxy del sistema (opciones de Internet de Windows, ajustes de red de macOS). Es lo que hace falta detrás de un proxy de empresa. Los destinos de este mismo equipo (`127.0.0.1`, `::1`, `localhost`) van siempre directos. Si ese proxy no responde, todas las llamadas fallan con un 502 (`cannot reach anthropic: ... tcp connect error`). Por `http://` sin cifrar, el proxy ve las cabeceras de la petición, claves de la API incluidas. Los destinos que no deben pasar por él van en `NO_PROXY`, por ejemplo `NO_PROXY=api.anthropic.com`.
 
 ## Métricas y coste
 
