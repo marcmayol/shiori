@@ -264,6 +264,8 @@ async fn ejecutar(comando: Comando) -> Result<i32, String> {
 }
 
 async fn servir(config: Config) -> Result<(), String> {
+    // Las señales se registran antes de escuchar: una parada temprana no mata el proceso a medias.
+    let parada = senal_de_parada();
     let direccion = format!("{}:{}", config.host, config.port);
     let listener = TcpListener::bind(&direccion).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::AddrInUse {
@@ -284,7 +286,7 @@ async fn servir(config: Config) -> Result<(), String> {
     }
     let apagar = s.senal_apagado();
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
+        if parada.await {
             tracing::info!("stopping");
             apagar.notify_one();
         }
@@ -292,6 +294,33 @@ async fn servir(config: Config) -> Result<(), String> {
     let r = s.esperar().await;
     let _ = std::fs::remove_file(ruta_clave);
     r.map_err(|e| e.to_string())
+}
+
+/// Lo que hace parar `serve` en orden: Ctrl+C y, en Unix, también SIGTERM (`kill`, systemd). En
+/// Unix los manejadores quedan registrados al llamarla, no al esperar el futuro. Da `false` si no se
+/// pudo escuchar ninguna señal.
+#[cfg(unix)]
+fn senal_de_parada() -> impl Future<Output = bool> + Send + 'static {
+    use tokio::signal::unix::{SignalKind, signal};
+    let int = signal(SignalKind::interrupt());
+    let term = signal(SignalKind::terminate());
+    async move {
+        match (int, term) {
+            (Ok(mut i), Ok(mut t)) => tokio::select! {
+                Some(()) = i.recv() => true,
+                Some(()) = t.recv() => true,
+                else => false,
+            },
+            (Ok(mut i), Err(_)) => i.recv().await.is_some(),
+            (Err(_), Ok(mut t)) => t.recv().await.is_some(),
+            (Err(_), Err(_)) => false,
+        }
+    }
+}
+
+#[cfg(not(unix))]
+async fn senal_de_parada() -> bool {
+    tokio::signal::ctrl_c().await.is_ok()
 }
 
 fn imprimir_rutas(config: &Config) {
