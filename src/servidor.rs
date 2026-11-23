@@ -34,17 +34,16 @@ impl ServidorEnMarcha {
 
     /// Para de aceptar peticiones, deja terminar las que están en curso, guarda las métricas y
     /// cierra la base (sin esperar a que se suelte la última copia, que puede tener una conexión).
-    pub async fn parar(self) {
+    pub async fn parar(mut self) {
         self.apagar.notify_one();
-        let _ = self.tarea.await;
+        let _ = (&mut self.tarea).await;
         let m = self.metricas.clone();
         let _ = tokio::task::spawn_blocking(move || m.cerrar()).await;
     }
 
     /// Espera a que el servidor termine (por `/_shiori/stop` o por `parar`).
-    pub async fn esperar(self) -> std::io::Result<()> {
-        let r = self
-            .tarea
+    pub async fn esperar(mut self) -> std::io::Result<()> {
+        let r = (&mut self.tarea)
             .await
             .unwrap_or_else(|e| Err(std::io::Error::other(e)));
         let m = self.metricas.clone();
@@ -54,6 +53,18 @@ impl ServidorEnMarcha {
 
     pub fn senal_apagado(&self) -> Arc<Notify> {
         self.apagar.clone()
+    }
+}
+
+/// Soltarlo sin `parar` ni `esperar` también pide el apagado y cierra la base: la tarea del
+/// servidor guarda su copia de las métricas, y si el hilo escritor sigue con el archivo abierto,
+/// en Windows no se puede borrar (los tests dejaban una carpeta con `metrics.db` en %TEMP%).
+/// Tras `parar` o `esperar` no hace nada: `cerrar` solo actúa la primera vez. Si no, espera a que
+/// el hilo guarde lo pendiente; lo que llegue después no se registra.
+impl Drop for ServidorEnMarcha {
+    fn drop(&mut self) {
+        self.apagar.notify_one();
+        self.metricas.cerrar();
     }
 }
 

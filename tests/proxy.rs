@@ -685,6 +685,31 @@ async fn al_parar_la_base_de_metricas_queda_cerrada() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn al_soltar_el_servidor_sin_parar_la_base_queda_cerrada() {
+    let e = entorno(OpcionesFalso::default()).await;
+    e.cliente
+        .post(e.url("/v1/messages"))
+        .json(&cuerpo_anthropic(false))
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    e.llamadas(1).await;
+    // Como hace `Entorno` al acabar cada test: la tarea del servidor sigue viva con sus métricas.
+    drop(e.proxy);
+    for r in shiori::bench::archivos_metricas(&e.metricas) {
+        match std::fs::remove_file(&r) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                panic!("{} sigue abierto: {err}", r.display())
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn bench_no_deja_su_base_en_temp() {
     let informe = shiori::bench::ejecutar(shiori::bench::OpcionesBench {
         peticiones: 20,
