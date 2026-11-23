@@ -139,6 +139,14 @@ pub fn nueva_clave(config: &Config) -> Result<String, String> {
     Ok(clave)
 }
 
+/// Borra la clave de parada solo si sigue siendo la de este servidor. En Unix, tras un `stop`, un
+/// `serve` nuevo puede arrancar mientras este termina sus llamadas y escribir la suya encima.
+pub fn borrar_clave(ruta: &Path, clave: &str) {
+    if std::fs::read_to_string(ruta).is_ok_and(|c| c == clave) {
+        let _ = std::fs::remove_file(ruta);
+    }
+}
+
 #[cfg(unix)]
 fn escribir_privado(ruta: &Path, texto: &str) -> std::io::Result<()> {
     use std::io::Write;

@@ -299,14 +299,14 @@ async fn servir(config: Config) -> Result<(), String> {
     let ruta_clave = lanzar::ruta_clave(&config);
     let url = config.url_local();
     let metricas = config.metricas.then(|| config.ruta_metricas.clone());
-    let s = servidor::arrancar(config, listener, Some(clave)).await?;
+    let s = servidor::arrancar(config, listener, Some(clave.clone())).await?;
     tracing::info!("Shiori {} listening at {url}", shiori::VERSION);
     match metricas {
         Some(r) => tracing::info!("metrics in {}", r.display()),
         None => tracing::info!("metrics off"),
     }
     let apagar = s.senal_apagado();
-    let clave_forzada = ruta_clave.clone();
+    let (ruta_forzada, clave_forzada) = (ruta_clave.clone(), clave.clone());
     tokio::spawn(async move {
         parada.esperar().await;
         tracing::info!("stopping (Ctrl+C or SIGTERM again stops at once)");
@@ -314,11 +314,11 @@ async fn servir(config: Config) -> Result<(), String> {
         // Un streaming largo puede tardar minutos en acabar: la segunda señal no espera.
         parada.esperar().await;
         tracing::warn!("stopping now");
-        let _ = std::fs::remove_file(&clave_forzada);
+        lanzar::borrar_clave(&ruta_forzada, &clave_forzada);
         std::process::exit(1);
     });
     let r = s.esperar().await;
-    let _ = std::fs::remove_file(ruta_clave);
+    lanzar::borrar_clave(&ruta_clave, &clave);
     if let Some(b) = bloqueo {
         drop(b);
         let _ = std::fs::remove_file(ruta_bloqueo);

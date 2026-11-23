@@ -379,7 +379,11 @@ fn stop_con_streaming_en_curso_sale_bien() {
     }
     let puerto = puerto_libre();
     let falso_url = format!("http://127.0.0.1:{puerto_falso}");
-    let mut s = serve(dir.path(), puerto, &[("SHIORI_UPSTREAM_ANTHROPIC", falso_url)]);
+    let mut s = serve(
+        dir.path(),
+        puerto,
+        &[("SHIORI_UPSTREAM_ANTHROPIC", falso_url)],
+    );
     esperar_salud(puerto);
     let llamada = std::thread::spawn(move || {
         post(
@@ -393,7 +397,11 @@ fn stop_con_streaming_en_curso_sale_bien() {
     let o = shiori(dir.path(), puerto, &["stop"]);
     assert!(o.status.success(), "{}", texto(&o));
     if cfg!(windows) {
-        assert!(texto(&o).contains("Shiori stopped listening"), "{}", texto(&o));
+        assert!(
+            texto(&o).contains("Shiori stopped listening"),
+            "{}",
+            texto(&o)
+        );
         let st = shiori(dir.path(), puerto, &["status"]);
         assert!(texto(&st).contains("Shiori is stopping"), "{}", texto(&st));
     } else {
@@ -401,7 +409,10 @@ fn stop_con_streaming_en_curso_sale_bien() {
     }
     let r = llamada.join().unwrap();
     assert!(r.starts_with("HTTP/1.1 200"), "{r}");
-    assert!(r.contains("message_stop"), "el streaming tiene que acabar entero: {r}");
+    assert!(
+        r.contains("message_stop"),
+        "el streaming tiene que acabar entero: {r}"
+    );
     let mut estado = None;
     for _ in 0..100 {
         if let Some(e) = s.0.try_wait().unwrap() {
@@ -412,4 +423,76 @@ fn stop_con_streaming_en_curso_sale_bien() {
     }
     let estado = estado.expect("serve no salió al acabar la llamada");
     assert!(estado.success(), "{estado:?}");
+}
+
+/// En Unix nada impide un `serve` nuevo mientras el anterior termina sus llamadas tras un `stop`.
+/// Al salir, el viejo no puede borrar la clave de parada del nuevo: si no, `stop` ya no lo para.
+#[cfg(unix)]
+#[test]
+fn el_serve_viejo_no_borra_la_clave_del_nuevo() {
+    let dir = tempfile::tempdir().unwrap();
+    let puerto_falso = puerto_libre();
+    // 20 tokens cada 150 ms: unos 3 s de streaming.
+    let _falso = Hijo(
+        Command::new(SHIORI)
+            .args(["fake", "--port", &puerto_falso.to_string()])
+            .args(["--tokens", "20", "--token-delay-ms", "150"])
+            .env("SHIORI_LOG", "warn")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", puerto_falso)).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let puerto = puerto_libre();
+    let falso_url = format!("http://127.0.0.1:{puerto_falso}");
+    let entorno = [("SHIORI_UPSTREAM_ANTHROPIC", falso_url)];
+    let mut viejo = serve(dir.path(), puerto, &entorno);
+    esperar_salud(puerto);
+    let llamada = std::thread::spawn(move || {
+        post(
+            puerto,
+            "/v1/messages",
+            r#"{"model":"claude-haiku-5-5","max_tokens":50,"stream":true,"messages":[]}"#,
+        )
+    });
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let o = shiori(dir.path(), puerto, &["stop"]);
+    assert!(o.status.success(), "{}", texto(&o));
+    let mut nuevo = serve(dir.path(), puerto, &entorno);
+    esperar_salud(puerto);
+    // Si no, el caso no se da: el viejo ya habría salido borrando su propia clave.
+    assert!(
+        viejo.0.try_wait().unwrap().is_none(),
+        "el serve viejo acabó antes de arrancar el nuevo"
+    );
+    assert!(llamada.join().unwrap().starts_with("HTTP/1.1 200"));
+    let salida = |h: &mut Hijo| {
+        for _ in 0..100 {
+            if let Some(e) = h.0.try_wait().unwrap() {
+                return Some(e);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        None
+    };
+    assert!(
+        salida(&mut viejo)
+            .expect("el serve viejo no salió")
+            .success()
+    );
+    assert!(dir.path().join(format!("server-{puerto}.key")).exists());
+    let o = shiori(dir.path(), puerto, &["stop"]);
+    assert!(o.status.success(), "{}", texto(&o));
+    assert!(
+        salida(&mut nuevo)
+            .expect("stop no paró el serve nuevo")
+            .success()
+    );
 }
